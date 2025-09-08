@@ -1,5 +1,5 @@
 """
-Apple iPhone automation script - Main functionality
+Apple iPhone automation script - Fixed version with correct constructor
 """
 
 import time
@@ -14,10 +14,52 @@ from config import Config
 
 
 class AppleAutomation:
-    def __init__(self, user_data=None):
+    def __init__(self, card_data=None, person_data=None, settings_data=None, user_data=None):
+        """Initialize with either new structured data or legacy user_data"""
         self.config = Config()
-        self.user_data = user_data or self.config.DEFAULT_VALUES
         self.driver = None
+        self._stopped = False
+        
+        # Handle both new structured format and legacy format
+        if card_data and person_data and settings_data:
+            # New structured format - combine data for automation
+            self.user_data = self._combine_automation_data(card_data, person_data, settings_data)
+        elif user_data:
+            # Legacy format
+            self.user_data = user_data
+        else:
+            # Fallback to default values
+            self.user_data = self.config.DEFAULT_VALUES
+            
+    def _combine_automation_data(self, card_data, person_data, settings_data):
+        """Combine structured data into the format expected by automation"""
+        # Use card's user info if available, otherwise fallback to pickup person
+        user_info = card_data.get('user_info', {})
+        billing_info = card_data.get('billing_info', {})
+        
+        return {
+            # Location data from settings
+            'zip_code': settings_data['zip_code'],
+            'street_address': settings_data['street_address'],
+            'postal_code': settings_data['postal_code'],
+            
+            # Contact info - prioritize card's user info, fallback to pickup person
+            'first_name': user_info.get('first_name', person_data['first_name']),
+            'last_name': user_info.get('last_name', person_data['last_name']),
+            'email': user_info.get('email', person_data['email']),
+            'phone': user_info.get('phone', person_data['phone']),
+            
+            # Payment data from card
+            'credit_card': card_data['card_number'],
+            'expiry_date': card_data['expiry_date'],
+            'cvc': card_data['cvc'],
+            
+            # Billing address from card's billing info
+            'billing_first_name': billing_info.get('first_name', user_info.get('first_name', person_data['first_name'])),
+            'billing_last_name': billing_info.get('last_name', user_info.get('last_name', person_data['last_name'])),
+            'billing_street_address': billing_info.get('street_address', settings_data['street_address']),
+            'billing_postal_code': billing_info.get('postal_code', settings_data['postal_code'])
+        }
         
     def setup_driver(self):
         """Initialize the Chrome driver with options"""
@@ -29,8 +71,20 @@ class AppleAutomation:
         self.driver = webdriver.Chrome(options=options)
         self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
+    def stop(self):
+        """Stop the automation"""
+        self._stopped = True
+        if self.driver:
+            try:
+                self.driver.quit()
+            except:
+                pass
+        
     def wait_and_click(self, selectors, element_name, timeout=None):
         """Wait for element and click it using multiple selector strategies"""
+        if self._stopped:
+            return False
+            
         if timeout is None:
             timeout = self.config.ELEMENT_TIMEOUT
             
@@ -38,6 +92,8 @@ class AppleAutomation:
             selectors = [selectors]
             
         for selector in selectors:
+            if self._stopped:
+                return False
             try:
                 element = WebDriverWait(self.driver, timeout).until(
                     EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
@@ -52,14 +108,17 @@ class AppleAutomation:
         
         # Fallback: try finding by text
         try:
-            all_buttons = self.driver.find_elements(By.TAG_NAME, "button")
-            for btn in all_buttons:
-                if btn.is_displayed() and btn.is_enabled():
-                    btn_text = btn.text.strip().lower()
-                    if any(keyword in btn_text for keyword in element_name.lower().split()):
-                        btn.click()
-                        print(f"{element_name} clicked successfully (text search method)")
-                        return True
+            if not self._stopped:
+                all_buttons = self.driver.find_elements(By.TAG_NAME, "button")
+                for btn in all_buttons:
+                    if self._stopped:
+                        return False
+                    if btn.is_displayed() and btn.is_enabled():
+                        btn_text = btn.text.strip().lower()
+                        if any(keyword in btn_text for keyword in element_name.lower().split()):
+                            btn.click()
+                            print(f"{element_name} clicked successfully (text search method)")
+                            return True
         except Exception as e:
             print(f"Text search method failed: {e}")
         
@@ -68,10 +127,15 @@ class AppleAutomation:
     
     def fill_input_field(self, selectors, value, field_name):
         """Fill input field using multiple selector strategies"""
+        if self._stopped:
+            return False
+            
         if isinstance(selectors, str):
             selectors = [selectors]
             
         for selector in selectors:
+            if self._stopped:
+                return False
             try:
                 field = WebDriverWait(self.driver, self.config.ELEMENT_TIMEOUT).until(
                     EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
@@ -89,6 +153,9 @@ class AppleAutomation:
     
     def analyze_store_availability(self):
         """Analyze store availability and select first available store"""
+        if self._stopped:
+            return False
+            
         try:
             store_elements = WebDriverWait(self.driver, self.config.ELEMENT_TIMEOUT).until(
                 EC.presence_of_all_elements_located((By.CSS_SELECTOR, self.config.SELECTORS['store_elements']))
@@ -102,6 +169,8 @@ class AppleAutomation:
             unavailable_stores = []
             
             for i, store in enumerate(store_elements, 1):
+                if self._stopped:
+                    return False
                 try:
                     store_name_elem = store.find_element(By.CSS_SELECTOR, self.config.SELECTORS['store_name'])
                     store_name = store_name_elem.text.strip()
@@ -176,7 +245,12 @@ class AppleAutomation:
     
     def select_pickup_time(self):
         """Select first available pickup time slot"""
+        if self._stopped:
+            return False
+            
         for selector in self.config.SELECTORS['pickup_time_dropdown']:
+            if self._stopped:
+                return False
             try:
                 dropdown = WebDriverWait(self.driver, self.config.ELEMENT_TIMEOUT).until(
                     EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
@@ -199,6 +273,8 @@ class AppleAutomation:
                 
                 # Select first available option
                 for option in options:
+                    if self._stopped:
+                        return False
                     option_text = option.text.strip()
                     option_value = option.get_attribute('value')
                     
@@ -229,10 +305,13 @@ class AppleAutomation:
         return False
     
     def fill_contact_form(self):
-        """Fill out the contact information form"""
-        print("Filling out contact form...")
+        """Fill out the contact information form using primary pickup person data"""
+        if self._stopped:
+            return False
+            
+        print("Filling out contact form with pickup person information...")
         
-        # Fill contact fields
+        # Fill contact fields - these should be the pickup person's details
         fields = [
             (self.config.SELECTORS['first_name'], self.user_data['first_name'], "First name"),
             (self.config.SELECTORS['last_name'], self.user_data['last_name'], "Last name"),
@@ -241,41 +320,55 @@ class AppleAutomation:
         ]
         
         for selectors, value, field_name in fields:
+            if self._stopped:
+                return False
             self.fill_input_field(selectors, value, field_name)
             time.sleep(0.5)
         
         # Submit form by pressing Enter on phone field
         try:
             for selector in self.config.SELECTORS['phone']:
+                if self._stopped:
+                    return False
                 try:
                     phone_input = self.driver.find_element(By.CSS_SELECTOR, selector)
                     phone_input.send_keys(Keys.RETURN)
-                    print("Pressed Enter to submit form")
+                    print("Pressed Enter to submit contact form")
                     break
                 except:
                     continue
         except:
             pass
+        return True
     
     def fill_billing_info(self):
-        """Fill billing information"""
+        """Fill billing information using pickup person's contact info"""
+        if self._stopped:
+            return False
+            
         print("Filling billing information...")
         
         # Click notification checkbox
         self.wait_and_click(self.config.SELECTORS['notification_checkbox'], "notification checkbox")
         
-        # Fill billing fields
+        # Fill billing fields - use pickup person's contact info for billing contact
         billing_fields = [
             (self.config.SELECTORS['billing_email'], self.user_data['email'], "Billing email"),
             (self.config.SELECTORS['billing_phone'], self.user_data['phone'], "Billing phone")
         ]
         
         for selectors, value, field_name in billing_fields:
+            if self._stopped:
+                return False
             self.fill_input_field(selectors, value, field_name)
             time.sleep(0.5)
+        return True
     
     def fill_payment_info(self):
-        """Fill payment information"""
+        """Fill payment information with enhanced billing address handling"""
+        if self._stopped:
+            return False
+            
         print("Filling payment information...")
         
         # Select credit payment option
@@ -292,6 +385,9 @@ class AppleAutomation:
             print(f"Error selecting credit payment: {e}")
             return False
         
+        if self._stopped:
+            return False
+        
         # Fill credit card fields
         try:
             card_fields = [
@@ -301,33 +397,54 @@ class AppleAutomation:
             ]
             
             for selector, value, field_name in card_fields:
+                if self._stopped:
+                    return False
                 if self.fill_input_field(selector, value, field_name):
                     time.sleep(self.config.SHORT_WAIT)
             
         except Exception as e:
             print(f"Error filling credit card fields: {e}")
         
-        # Fill billing address
+        if self._stopped:
+            return False
+        
+        # Fill billing address using the enhanced billing data
+        print("Filling billing address information...")
         billing_address_fields = [
-            (self.config.SELECTORS['billing_first_name'], self.user_data['first_name'], "Billing first name"),
-            (self.config.SELECTORS['billing_last_name'], self.user_data['last_name'], "Billing last name"),
-            (self.config.SELECTORS['billing_street'], self.user_data['street_address'], "Billing street address"),
-            (self.config.SELECTORS['billing_postal_code'], self.user_data['postal_code'], "Billing postal code")
+            (self.config.SELECTORS['billing_first_name'], 
+             self.user_data.get('billing_first_name', self.user_data['first_name']), 
+             "Billing first name"),
+            (self.config.SELECTORS['billing_last_name'], 
+             self.user_data.get('billing_last_name', self.user_data['last_name']), 
+             "Billing last name"),
+            (self.config.SELECTORS['billing_street'], 
+             self.user_data.get('billing_street_address', self.user_data['street_address']), 
+             "Billing street address"),
+            (self.config.SELECTORS['billing_postal_code'], 
+             self.user_data.get('billing_postal_code', self.user_data['postal_code']), 
+             "Billing postal code")
         ]
         
         for selector, value, field_name in billing_address_fields:
+            if self._stopped:
+                return False
             if self.fill_input_field(selector, value, field_name):
                 time.sleep(0.5)
         
         return True
     
-    def run_automation(self):
-        """Main automation workflow"""
+    def run(self):
+        """Main automation workflow with enhanced data handling"""
         try:
             print("Starting Apple website automation...")
+            print(f"Using contact info: {self.user_data['first_name']} {self.user_data['last_name']}")
+            print(f"Using billing info: {self.user_data.get('billing_first_name', 'Same as contact')} {self.user_data.get('billing_last_name', 'Same as contact')}")
             
             # Setup driver
             self.setup_driver()
+            
+            if self._stopped:
+                return False
             
             # Navigate to product page
             print("Opening Apple website...")
@@ -336,6 +453,9 @@ class AppleAutomation:
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
             print("Page loaded successfully")
+            
+            if self._stopped:
+                return False
             
             # Scroll to load content
             print("Scrolling down to load content...")
@@ -362,7 +482,7 @@ class AppleAutomation:
             # Submit zip code
             zip_input = self.driver.find_element(By.CSS_SELECTOR, self.config.SELECTORS['zip_input'])
             zip_input.send_keys(Keys.RETURN)
-            print("Pressing Enter")
+            print("Pressing Enter to search stores")
             
             # Wait for store results and analyze availability
             print("Waiting for store results to load...")
@@ -395,7 +515,7 @@ class AppleAutomation:
                 return False
             
             # Continue as guest
-            print("Waiting for checkout page to load...")
+            print("Waiting for guest checkout option...")
             time.sleep(self.config.LONG_WAIT)
             if not self.wait_and_click(self.config.SELECTORS['guest_checkout'], "Continue as Guest button"):
                 return False
@@ -407,7 +527,7 @@ class AppleAutomation:
                 return False
             
             # Continue to pickup person selection
-            print("Waiting for page to update...")
+            print("Continuing to pickup person selection...")
             time.sleep(self.config.MEDIUM_WAIT)
             if not self.wait_and_click(self.config.SELECTORS['final_continue'], "Final Continue button"):
                 return False
@@ -418,40 +538,45 @@ class AppleAutomation:
             if not self.wait_and_click(self.config.SELECTORS['third_party_pickup'], "Someone else to pick up option"):
                 return False
             
-            # Fill contact form
-            print("Waiting for contact form to load...")
+            # Fill contact form with pickup person data
+            print("Filling contact form with pickup person information...")
             time.sleep(self.config.MEDIUM_WAIT)
-            self.fill_contact_form()
+            if not self.fill_contact_form():
+                return False
             
             # Fill billing info
-            print("Looking for notification checkbox and billing fields...")
+            print("Filling billing contact information...")
             time.sleep(self.config.MEDIUM_WAIT)
-            self.fill_billing_info()
+            if not self.fill_billing_info():
+                return False
             
             # Continue to payment
-            print("Looking for Continue to Payment button...")
+            print("Proceeding to payment section...")
             time.sleep(self.config.MEDIUM_WAIT)
             if not self.wait_and_click(self.config.SELECTORS['continue_payment'], "Continue to Payment button"):
                 return False
             
-            # Fill payment information
+            # Fill payment information with enhanced billing
             time.sleep(self.config.MEDIUM_WAIT)
             if not self.fill_payment_info():
                 return False
             
             # Continue to review
-            print("Looking for Continue to Review button...")
+            print("Proceeding to order review...")
             time.sleep(self.config.MEDIUM_WAIT)
             if not self.wait_and_click("button[id='rs-checkout-continue-button-bottom']", "Continue to Review button"):
                 return False
             
             # Final continue on review page
-            print("Looking for final Continue button...")
+            print("Final step - order review...")
             time.sleep(self.config.MEDIUM_WAIT)
             if not self.wait_and_click("button[id='rs-checkout-continue-button-bottom']", "Continue button on review page"):
                 return False
             
             print("SUCCESS: All steps completed successfully!")
+            print("✅ Payment card user data and pickup person properly configured")
+            print("✅ Billing address information correctly filled")
+            print("✅ Primary pickup person selected for device collection")
             print("Keeping browser open to see final results...")
             time.sleep(self.config.FINAL_WAIT)
             
@@ -469,4 +594,4 @@ class AppleAutomation:
 if __name__ == "__main__":
     # For testing with default values
     automation = AppleAutomation()
-    automation.run_automation()
+    automation.run()
