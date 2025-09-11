@@ -139,6 +139,24 @@ sudo yum install python3-tkinter
 sudo dnf install python3-tkinter
 ```
 
+### SQLite Issues (Rare)
+SQLite3 comes with Python by default. If you encounter database errors:
+```bash
+# Ubuntu/Debian
+sudo apt install sqlite3
+
+# CentOS/RHEL
+sudo yum install sqlite
+
+# Fedora
+sudo dnf install sqlite
+
+# macOS with Homebrew
+brew install sqlite
+
+# Windows - usually not needed, included with Python
+```
+
 ### Python Command Not Found
 - **Windows**: Reinstall Python with "Add to PATH" checked
 - **macOS**: Use `python3` instead of `python`
