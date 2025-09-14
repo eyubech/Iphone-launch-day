@@ -1,0 +1,790 @@
+// ==UserScript==
+// @name         iPhone Order Bot - Apple Secure
+// @namespace    http://tampermonkey.net/
+// @version      2.4
+// @description  Automatically order iPhone with no coverage option across all Apple pages
+// @author       You
+// @match        *://localhost:800/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    function log(message) {
+        console.log('[iPhone Order Bot]', message);
+    }
+
+    // Configuration
+    const zipCode = "33132";
+
+    log('Script loaded on: ' + window.location.href);
+
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function clickElement(element, description) {
+        try {
+            // Scroll to element first
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            // Wait a moment for scroll
+            setTimeout(() => {
+                // Try multiple click methods
+                try {
+                    element.focus();
+                    element.click();
+                    log(`Successfully clicked ${description}`);
+                    return true;
+                } catch (e1) {
+                    try {
+                        // Try dispatching click event
+                        const clickEvent = new MouseEvent('click', {
+                            view: window,
+                            bubbles: true,
+                            cancelable: true
+                        });
+                        element.dispatchEvent(clickEvent);
+                        log(`Event dispatched for ${description}`);
+                        return true;
+                    } catch (e2) {
+                        try {
+                            // For form elements, try setting checked/selected
+                            if (element.type === 'radio' || element.type === 'checkbox') {
+                                element.checked = true;
+                                element.dispatchEvent(new Event('change', { bubbles: true }));
+                                log(`Form element selected for ${description}`);
+                                return true;
+                            }
+                        } catch (e3) {
+                            log(`All click methods failed for ${description}: ${e3.message}`);
+                            return false;
+                        }
+                    }
+                }
+            }, 500);
+
+            return true;
+        } catch (e) {
+            log(`Failed to click ${description}: ${e.message}`);
+            return false;
+        }
+    }
+
+    function findNoCoverage() {
+        const applecareInput = document.querySelector("input[id*='applecare'][id*='no']");
+        if (applecareInput && applecareInput.offsetParent !== null) {
+            return clickElement(applecareInput, 'no applecare input');
+        }
+
+        const applecareByClass = document.querySelector("input[class*='applecare'][class*='no']");
+        if (applecareByClass && applecareByClass.offsetParent !== null) {
+            return clickElement(applecareByClass, 'no applecare by class');
+        }
+
+        const radios = document.querySelectorAll("input[type='radio']");
+        for (let radio of radios) {
+            const id = radio.id || '';
+            const name = radio.name || '';
+            const dataAutom = radio.getAttribute('data-autom') || '';
+            const label = radio.closest('label');
+            const labelText = label ? label.textContent.toLowerCase() : '';
+
+            if (id.includes('trade') || name.includes('trade') || dataAutom.includes('trade')) {
+                continue;
+            }
+
+            if ((id.includes('applecare') && id.includes('no')) ||
+                (name.includes('applecare') && (dataAutom.includes('no') || labelText.includes('no'))) ||
+                (dataAutom.includes('applecare') && dataAutom.includes('no')) ||
+                (labelText.includes('no coverage') || labelText.includes('no applecare'))) {
+                log(`Found AppleCare option: ${id || name || dataAutom}`);
+                if (clickElement(radio, `applecare option ${id || name}`)) {
+                    return true;
+                }
+            }
+        }
+
+        log('No AppleCare option found');
+        return false;
+    }
+
+    function findAddToBag() {
+        const selectors = [
+            "button[name='add-to-cart'][value='add-to-cart']",
+            "button[data-autom='add-to-cart']",
+            "button[data-analytics-title*='Add to Bag']",
+            "button[class*='add-to-bag']",
+            "button[class*='add-to-cart']"
+        ];
+
+        for (let selector of selectors) {
+            const button = document.querySelector(selector);
+            if (button && button.offsetParent !== null && !button.disabled) {
+                return clickElement(button, 'add to bag button');
+            }
+        }
+
+        const buttons = document.querySelectorAll('button');
+        for (let button of buttons) {
+            const text = button.textContent.toLowerCase();
+            if ((text.includes('add to bag') || text.includes('add to cart')) && !button.disabled) {
+                return clickElement(button, 'add to bag button');
+            }
+        }
+        return false;
+    }
+
+    function findCheckoutButton() {
+        log('Searching for checkout button...');
+
+        const checkoutSelectors = [
+            "button[id*='navCheckoutOtherPayments']",
+            "button[id*='checkout']",
+            "button[class*='checkout']",
+            "button[data-autom*='checkout']",
+            "div[class*='checkout'] button",
+            "button[id='shoppingcart.actions.navCheckoutOtherPayments']"
+        ];
+
+        for (let selector of checkoutSelectors) {
+            const button = document.querySelector(selector);
+            if (button && button.offsetParent !== null && !button.disabled) {
+                log(`Found checkout button with selector: ${selector}`);
+                return clickElement(button, 'checkout button');
+            }
+        }
+
+        const allButtons = document.querySelectorAll('button');
+        log(`Found ${allButtons.length} total buttons`);
+
+        for (let button of allButtons) {
+            const text = button.textContent ? button.textContent.toLowerCase() : '';
+            const id = button.id ? button.id.toLowerCase() : '';
+            const className = button.className ? button.className.toLowerCase() : '';
+
+            if (text.includes('checkout') || id.includes('checkout') || className.includes('checkout')) {
+                log(`Found checkout button: text="${text}", id="${id}"`);
+                if (clickElement(button, 'checkout button')) {
+                    return true;
+                }
+            }
+        }
+
+        log('No checkout button found');
+        return false;
+    }
+
+    function findGuestCheckout() {
+        log('Searching for guest checkout button...');
+        log(`Current URL: ${window.location.href}`);
+
+        // First, try to find the specific guest checkout button
+        const guestSelectors = [
+            "button[id='signin.guestLogin.guestLogin']",
+            "button[id*='guestLogin']",
+            "button[class*='guest']",
+            "button[data-autom*='guest']",
+            "button[data-autom='signin-guest-checkout']",
+            "input[type='submit'][value*='guest']"
+        ];
+
+        for (let selector of guestSelectors) {
+            const button = document.querySelector(selector);
+            if (button && button.offsetParent !== null && !button.disabled) {
+                log(`Found guest checkout button with selector: ${selector}`);
+                return clickElement(button, 'guest checkout button');
+            }
+        }
+
+        // Look for forms that might contain guest checkout
+        const forms = document.querySelectorAll('form');
+        for (let form of forms) {
+            const formId = form.id || '';
+            const formAction = form.action || '';
+
+            if (formId.includes('guest') || formAction.includes('guest')) {
+                const submitButton = form.querySelector('button[type="submit"], input[type="submit"]');
+                if (submitButton) {
+                    log(`Found guest form submit button`);
+                    return clickElement(submitButton, 'guest form submit');
+                }
+            }
+        }
+
+        // Enhanced button search with better text matching
+        const allButtons = document.querySelectorAll('button, input[type="submit"], input[type="button"]');
+        log(`Found ${allButtons.length} total buttons on page`);
+
+        for (let i = 0; i < allButtons.length; i++) {
+            const button = allButtons[i];
+            const text = button.textContent ? button.textContent.toLowerCase().trim() : '';
+            const value = button.value ? button.value.toLowerCase().trim() : '';
+            const id = button.id ? button.id.toLowerCase() : '';
+            const className = button.className ? button.className.toLowerCase() : '';
+            const dataAutom = button.getAttribute('data-autom') || '';
+            const ariaLabel = button.getAttribute('aria-label') || '';
+
+            // More comprehensive text matching
+            const allText = `${text} ${value} ${id} ${className} ${dataAutom} ${ariaLabel}`.toLowerCase();
+
+            log(`Button ${i}: text="${text}", value="${value}", id="${id}", class="${className}"`);
+
+            // Check if this button is visible and clickable
+            if (button.offsetParent === null || button.disabled) {
+                continue;
+            }
+
+            // Look for guest-related keywords
+            if (allText.includes('guest') ||
+                allText.includes('continue as guest') ||
+                allText.includes('checkout as guest') ||
+                allText.includes('continue without signing in') ||
+                allText.includes('continue without account') ||
+                text === 'continue' ||
+                value === 'continue') {
+
+                log(`Found potential guest button: text="${text}", value="${value}", id="${id}"`);
+
+                // Try clicking this button
+                if (clickElement(button, `guest checkout button ${i}`)) {
+                    return true;
+                }
+            }
+        }
+
+        // If no guest button found, try to look for any "Continue" button
+        for (let i = 0; i < allButtons.length; i++) {
+            const button = allButtons[i];
+            const text = button.textContent ? button.textContent.toLowerCase().trim() : '';
+            const value = button.value ? button.value.toLowerCase().trim() : '';
+
+            if (button.offsetParent !== null && !button.disabled &&
+                (text === 'continue' || value === 'continue' ||
+                 text.includes('proceed') || value.includes('proceed'))) {
+
+                log(`Trying fallback continue button: "${text}" or "${value}"`);
+                if (clickElement(button, `continue button ${i}`)) {
+                    return true;
+                }
+            }
+        }
+
+        log('No guest checkout button found');
+        return false;
+    }
+
+    function findReviewBag() {
+        log('Searching for proceed/review bag buttons...');
+
+        const selectors = [
+            "button[name='proceed'][value='proceed']",
+            "button[data-autom='proceed']",
+            "button[type='submit'][name='proceed']",
+            "input[type='submit'][name='proceed']",
+            "button[class*='proceed']",
+            "button[data-testid='proceed']",
+            "button[form*='attach']",
+            "form[name*='attach'] button[type='submit']",
+            "form[id*='attach'] button[type='submit']"
+        ];
+
+        for (let selector of selectors) {
+            const button = document.querySelector(selector);
+            if (button && button.offsetParent !== null && !button.disabled) {
+                log(`Found proceed button with selector: ${selector}`);
+                return clickElement(button, 'review bag button');
+            }
+        }
+
+        const allButtons = document.querySelectorAll('button, input[type="submit"]');
+        log(`Found ${allButtons.length} total buttons/inputs`);
+
+        for (let button of allButtons) {
+            const text = button.textContent ? button.textContent.toLowerCase() : '';
+            const value = button.value ? button.value.toLowerCase() : '';
+            const ariaLabel = button.getAttribute('aria-label') ? button.getAttribute('aria-label').toLowerCase() : '';
+            const dataAutom = button.getAttribute('data-autom') ? button.getAttribute('data-autom').toLowerCase() : '';
+
+            if ((text.includes('review bag') || text.includes('proceed') ||
+                 text.includes('continue') || text.includes('add to bag') ||
+                 value.includes('proceed') || ariaLabel.includes('proceed') ||
+                 dataAutom.includes('proceed')) && !button.disabled) {
+                log(`Found matching button: ${text || value || ariaLabel || dataAutom}`);
+                if (clickElement(button, 'review bag button')) {
+                    return true;
+                }
+            }
+        }
+
+        log('No proceed button found');
+        return false;
+    }
+
+    function findSkipAccessories() {
+        const selectors = [
+            "button[data-autom='skip']",
+            "button[name='skip']",
+            "button[class*='skip']"
+        ];
+
+        for (let selector of selectors) {
+            const button = document.querySelector(selector);
+            if (button && button.offsetParent !== null && !button.disabled) {
+                return clickElement(button, 'skip accessories button');
+            }
+        }
+
+        const buttons = document.querySelectorAll('button');
+        for (let button of buttons) {
+            const text = button.textContent.toLowerCase();
+            if ((text.includes('skip') || text.includes('no thanks') ||
+                 text.includes('continue without')) && !button.disabled) {
+                return clickElement(button, 'skip accessories button');
+            }
+        }
+        return false;
+    }
+
+    function getCurrentStep() {
+        const url = window.location.href.toLowerCase();
+        const path = window.location.pathname.toLowerCase();
+        const hostname = window.location.hostname.toLowerCase();
+
+        log(`Analyzing URL: ${url}`);
+        log(`Hostname: ${hostname}`);
+        log(`Path: ${path}`);
+
+        // Check for fulfillment page
+        if (url.includes('fulfillment') || path.includes('fulfillment') ||
+            url.includes('_s=fulfillment') || url.includes('?_s=fulfillment')) {
+            log('Detected fulfillment page');
+            return 'fulfillment_page';
+        }
+
+        if ((url.includes('signin') || path.includes('signin') ||
+            hostname.includes('secure')) &&
+            (document.querySelector("button[id*='guestLogin']") ||
+             document.querySelector("button[id*='guest']") ||
+             document.querySelector("div[class*='guest-checkout']") ||
+             document.querySelector("h2[class*='guest-checkout']") ||
+             document.querySelector("button") ||
+             url.includes('signin'))) {
+            log('Detected signin/guest page');
+            return 'signin_page';
+        }
+
+        if (url.includes('step=attach') || path.includes('step=attach')) {
+            log('Detected attach page by URL parameter');
+            return 'attach_page';
+        }
+
+        if (url.includes('attach') || url.includes('accessories') ||
+            document.querySelector('[data-step="attach"]')) {
+            log('Detected attach page by content');
+            return 'attach_page';
+        }
+
+        if (url.includes('bag') || path.includes('bag') ||
+            url.includes('cart') || path.includes('cart') ||
+            url.includes('checkout') ||
+            document.querySelector("button[id*='checkout']") ||
+            document.querySelector("div[class*='bag-checkout']")) {
+            log('Detected bag page');
+            return 'bag_page';
+        }
+
+        if (path.includes('iphone') || url.includes('iphone') ||
+            path.includes('buy-iphone') || url.includes('buy/iphone')) {
+
+            const hasAppleCare = document.querySelector("input[id*='applecare']") ||
+                               document.querySelector("input[name*='applecare']");
+            const hasAddToBag = document.querySelector("button[name='add-to-cart']") ||
+                              document.querySelector("button[data-autom='add-to-cart']") ||
+                              document.querySelector("button[class*='add-to-bag']");
+
+            if (hasAppleCare || hasAddToBag) {
+                log('Detected product page');
+                return 'product_page';
+            }
+        }
+
+        const hasProceed = document.querySelector("button[name='proceed']") ||
+                         document.querySelector("button[data-autom='proceed']") ||
+                         document.querySelector("button[data-testid='proceed']");
+
+        if (hasProceed) {
+            log('Detected attach page by proceed button');
+            return 'attach_page';
+        }
+
+        log('Page type unknown');
+        return 'unknown';
+    }
+
+    async function runProductPage() {
+        log('Running product page flow...');
+
+        await sleep(2000);
+
+        log('Scrolling...');
+        window.scrollTo(0, document.body.scrollHeight * 0.25);
+        await sleep(3000);
+
+        log('Looking for no coverage option...');
+        if (findNoCoverage()) {
+            log('No coverage selected');
+            await sleep(2000);
+        }
+
+        log('Looking for add to bag button...');
+        if (findAddToBag()) {
+            log('Add to bag clicked - moving to next page');
+            sessionStorage.setItem('iphoneBotProgress', 'added_to_bag');
+            return true;
+        } else {
+            log('Add to bag button not found');
+            return false;
+        }
+    }
+
+    async function runAttachPage() {
+        log('Running attach/accessories page flow...');
+        log(`Current URL: ${window.location.href}`);
+
+        await sleep(3000);
+
+        log('Looking for skip accessories option...');
+        if (findSkipAccessories()) {
+            log('Skip accessories clicked');
+            await sleep(2000);
+        }
+
+        log('Looking for proceed/review bag button...');
+        if (findReviewBag()) {
+            log('Proceed button clicked');
+            sessionStorage.setItem('iphoneBotProgress', 'proceeded');
+            return true;
+        } else {
+            log('No proceed button found, trying alternative approaches...');
+
+            const submitButtons = document.querySelectorAll('button[type="submit"], input[type="submit"]');
+            log(`Found ${submitButtons.length} submit buttons`);
+
+            for (let i = 0; i < submitButtons.length; i++) {
+                const button = submitButtons[i];
+                if (button.offsetParent !== null && !button.disabled) {
+                    log(`Trying submit button ${i}: ${button.textContent || button.value}`);
+                    if (clickElement(button, `submit button ${i}`)) {
+                        sessionStorage.setItem('iphoneBotProgress', 'proceeded');
+                        return true;
+                    }
+                }
+            }
+
+            log('No working buttons found');
+            return false;
+        }
+    }
+
+    async function runBagPage() {
+        log('Running bag page flow...');
+        log(`Current URL: ${window.location.href}`);
+
+        await sleep(3000);
+
+        log('Looking for checkout button...');
+        if (findCheckoutButton()) {
+            log('Checkout button clicked');
+            sessionStorage.setItem('iphoneBotProgress', 'checkout');
+            return true;
+        } else {
+            log('Checkout button not found');
+            return false;
+        }
+    }
+
+    async function runSigninPage() {
+        log('Running signin/guest page flow...');
+        log(`Current URL: ${window.location.href}`);
+        log(`Current hostname: ${window.location.hostname}`);
+
+        await sleep(3000);
+
+        log('Looking for guest checkout button...');
+        if (findGuestCheckout()) {
+            log('Guest checkout button clicked');
+            sessionStorage.setItem('iphoneBotProgress', 'guest_selected');
+            return true;
+        } else {
+            log('No guest checkout method worked');
+            return false;
+        }
+    }
+
+    async function runFulfillmentPage() {
+        log('Running fulfillment page flow...');
+        log(`Current URL: ${window.location.href}`);
+
+        await sleep(3000);
+
+        // First, fill in the zip code if there's an input field
+        const zipCodeInput = document.querySelector("input[data-autom='checkout.fulfillment.deliveryTab.delivery.deliveryLocation.address.postalCode.input']") ||
+                           document.querySelector("input[aria-label*='ZIP']") ||
+                           document.querySelector("input[aria-label*='zip']") ||
+                           document.querySelector("input[aria-label*='Zip']") ||
+                           document.querySelector("input[name*='zip']") ||
+                           document.querySelector("input[name*='postal']") ||
+                           document.querySelector("input[id*='zip']") ||
+                           document.querySelector("input[id*='postal']");
+
+        if (zipCodeInput && zipCodeInput.offsetParent !== null) {
+            log('Found zip code input, filling it...');
+            zipCodeInput.focus();
+            zipCodeInput.value = zipCode;
+            zipCodeInput.dispatchEvent(new Event('input', { bubbles: true }));
+            zipCodeInput.dispatchEvent(new Event('change', { bubbles: true }));
+            log(`Zip code ${zipCode} entered`);
+            await sleep(1000);
+
+            // Look for and click the Apply Zip Code button
+            const applyButtons = document.querySelectorAll('button');
+            for (let button of applyButtons) {
+                const text = button.textContent ? button.textContent.toLowerCase().trim() : '';
+                const ariaLabel = button.getAttribute('aria-label') ? button.getAttribute('aria-label').toLowerCase() : '';
+
+                if ((text.includes('apply') && (text.includes('zip') || text.includes('code'))) ||
+                    (ariaLabel.includes('apply') && (ariaLabel.includes('zip') || ariaLabel.includes('code'))) ||
+                    text === 'apply' ||
+                    button.id === 'checkout.fulfillment.deliveryTab.delivery.deliveryLocation.address.optionSelectButton') {
+
+                    if (button.offsetParent !== null && !button.disabled) {
+                        log(`Found apply button: "${text}" or aria-label: "${ariaLabel}"`);
+                        if (clickElement(button, 'apply zip code button')) {
+                            await sleep(2000);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Look for delivery/pickup options
+        const deliveryButton = document.querySelector("button[class*='rc-segmented-control-button']:not([class*='selected'])");
+        if (deliveryButton && deliveryButton.textContent.toLowerCase().includes('delivered')) {
+            log('Found delivery option, clicking...');
+            if (clickElement(deliveryButton, 'delivery option')) {
+                await sleep(3000); // Wait longer for delivery options to load
+            }
+        }
+
+        // Scroll to 90% of the page to load the continue button
+        log('Scrolling to 90% to load continue button...');
+        window.scrollTo(0, document.body.scrollHeight * 0.9);
+        await sleep(2000);
+
+        // Check if there's a delivery date showing (like "Fri, Sep 19")
+        const deliveryDateElements = document.querySelectorAll('span');
+        let hasDeliveryDate = false;
+
+        for (let element of deliveryDateElements) {
+            const text = element.textContent || '';
+            // Look for date patterns like "Fri, Sep 19", "Mon, Sep 23", etc.
+            if (text.match(/\w{3},?\s+\w{3}\s+\d{1,2}/) || text.includes('Delivers') || text.includes('19')) {
+                log(`Found delivery date: ${text}`);
+                hasDeliveryDate = true;
+                break;
+            }
+        }
+
+        // If delivery date is shown, look for "Continue to Shipping Address/Payment" button
+        if (hasDeliveryDate) {
+            log('Delivery date found, looking for continue button...');
+
+            const continueSelectors = [
+                "button[id='rs-checkout-continue-button-bottom']",
+                "button[data-autom='fulfillment-continue']",
+                "button[class*='checkout-action-button']",
+                "button[class*='form-button']"
+            ];
+
+            for (let selector of continueSelectors) {
+                const button = document.querySelector(selector);
+                if (button && button.offsetParent !== null && !button.disabled) {
+                    log(`Found continue button with selector: ${selector}`);
+                    if (clickElement(button, 'continue to shipping button')) {
+                        log('CONTINUE TO SHIPPING CLICKED - SCRIPT EXECUTION COMPLETE');
+                        sessionStorage.setItem('iphoneBotProgress', 'shipping_continue');
+                        attempts = maxAttempts + 1;
+                        return 'STOP';
+                    }
+                }
+            }
+
+            // Fallback: look for any button with "Continue" text
+            const allButtons = document.querySelectorAll('button');
+            log(`Found ${allButtons.length} total buttons after scrolling`);
+
+            for (let button of allButtons) {
+                const text = button.textContent ? button.textContent.toLowerCase().trim() : '';
+                const ariaLabel = button.getAttribute('aria-label') ? button.getAttribute('aria-label').toLowerCase() : '';
+                const id = button.id || '';
+
+                log(`Checking button: text="${text}", id="${id}", visible=${button.offsetParent !== null}, disabled=${button.disabled}`);
+
+                if ((text.includes('continue') && (text.includes('shipping') || text.includes('payment') || text.includes('address'))) ||
+                    text === 'continue' ||
+                    text.includes('continue to') ||
+                    ariaLabel.includes('continue')) {
+
+                    if (button.offsetParent !== null && !button.disabled) {
+                        log(`Found continue button: "${text}"`);
+                        if (clickElement(button, 'continue button')) {
+                            log('CONTINUE BUTTON CLICKED - SCRIPT EXECUTION COMPLETE');
+                            sessionStorage.setItem('iphoneBotProgress', 'shipping_continue');
+                            attempts = maxAttempts + 1;
+                            return 'STOP';
+                        }
+                    }
+                }
+            }
+        } else {
+            // Even if no delivery date found, still try to find continue button after scrolling
+            log('No delivery date found, but still looking for continue button...');
+            const allButtons = document.querySelectorAll('button');
+
+            for (let button of allButtons) {
+                const text = button.textContent ? button.textContent.toLowerCase().trim() : '';
+
+                if (text.includes('continue') && button.offsetParent !== null && !button.disabled) {
+                    log(`Found continue button without delivery date: "${text}"`);
+                    if (clickElement(button, 'continue button')) {
+                        log('CONTINUE BUTTON CLICKED - SCRIPT EXECUTION COMPLETE');
+                        sessionStorage.setItem('iphoneBotProgress', 'shipping_continue');
+                        attempts = maxAttempts + 1;
+                        return 'STOP';
+                    }
+                }
+            }
+        }
+
+        log('No continue button found on fulfillment page');
+        return false;
+    }
+
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    async function run() {
+        attempts++;
+        if (attempts > maxAttempts) {
+            log('Max attempts reached, stopping...');
+            return;
+        }
+
+        await sleep(3000);
+
+        const step = getCurrentStep();
+        log(`Attempt ${attempts}: Current step: ${step}`);
+
+        let success = false;
+
+        switch (step) {
+            case 'product_page':
+                success = await runProductPage();
+                break;
+            case 'attach_page':
+                success = await runAttachPage();
+                break;
+            case 'bag_page':
+                success = await runBagPage();
+                break;
+            case 'signin_page':
+                success = await runSigninPage();
+                if (success === 'STOP') {
+                    log('SCRIPT EXECUTION STOPPED - GUEST BUTTON CLICKED');
+                    return; // Stop the script completely
+                }
+                break;
+            case 'fulfillment_page':
+                success = await runFulfillmentPage();
+                if (success === 'STOP') {
+                    log('SCRIPT EXECUTION STOPPED - DELIVERY SELECTED');
+                    return; // Stop the script completely
+                }
+                break;
+            case 'shipping_page':
+                success = await runShippingPage();
+                if (success === 'STOP') {
+                    log('SCRIPT EXECUTION STOPPED - SHIPPING FORM COMPLETED');
+                    return; // Stop the script completely
+                }
+                break;
+            default:
+                if (window.location.href.toLowerCase().includes('iphone')) {
+                    log('Forcing product page flow for iPhone URL...');
+                    success = await runProductPage();
+                } else {
+                    log('Unknown page, waiting for navigation...');
+                    await sleep(5000);
+                    if (attempts < maxAttempts) {
+                        run();
+                    }
+                }
+        }
+
+        if (!success && attempts < maxAttempts) {
+            log('Retrying in 3 seconds...');
+            await sleep(3000);
+            run();
+        }
+    }
+
+    let currentUrl = window.location.href;
+
+    function handlePageChange() {
+        // Don't handle page changes if we've already completed delivery selection
+        if (sessionStorage.getItem('iphoneBotProgress') === 'delivery_selected') {
+            log('Delivery already selected, ignoring page changes');
+            return;
+        }
+
+        const newUrl = window.location.href;
+        if (newUrl !== currentUrl) {
+            log(`Page changed from ${currentUrl} to ${newUrl}`);
+            currentUrl = newUrl;
+            attempts = 0;
+            setTimeout(run, 2000);
+        }
+    }
+
+    const observer = new MutationObserver(handlePageChange);
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    window.addEventListener('popstate', handlePageChange);
+
+    const originalPushState = history.pushState;
+    const originalReplaceState = history.replaceState;
+
+    history.pushState = function(...args) {
+        originalPushState.apply(this, args);
+        handlePageChange();
+    };
+
+    history.replaceState = function(...args) {
+        originalReplaceState.apply(this, args);
+        handlePageChange();
+    };
+
+    setTimeout(() => {
+        log('Force running script after page load...');
+        run();
+    }, 2000);
+
+    setTimeout(() => {
+        log('Final force run...');
+        run();
+    }, 5000);
+
+})();
