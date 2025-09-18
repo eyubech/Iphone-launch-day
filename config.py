@@ -191,4 +191,6 @@ class Config:
     }
     
     # Product URL
-    PRODUCT_URL = "https://www.apple.com/shop/buy-iphone/iphone-16-pro/6.3-inch-display-128gb-desert-titanium-unlocked"
+    # PRODUCT_URL = "localhost:8000/apple"
+    
+    PRODUCT_URL =  "https://www.apple.com/shop/buy-iphone/iphone-17-pro/6.3-inch-display-256gb-deep-blue-unlocked"

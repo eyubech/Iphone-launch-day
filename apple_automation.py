@@ -1,60 +1,45 @@
-"""
-Apple iPhone automation script - Fixed version with correct constructor
-"""
-
 import time
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import Select
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from config import Config
 
 
 class AppleAutomation:
     def __init__(self, card_data=None, person_data=None, settings_data=None, user_data=None):
-        """Initialize with either new structured data or legacy user_data"""
         self.config = Config()
         self.driver = None
         self._stopped = False
+        self.purchase_count = 0
+        self.max_purchases = 2
+        self.saved_link = ''
         
-        # Handle both new structured format and legacy format
         if card_data and person_data and settings_data:
-            # New structured format - combine data for automation
             self.user_data = self._combine_automation_data(card_data, person_data, settings_data)
         elif user_data:
-            # Legacy format
             self.user_data = user_data
         else:
-            # Fallback to default values
             self.user_data = self.config.DEFAULT_VALUES
             
     def _combine_automation_data(self, card_data, person_data, settings_data):
-        """Combine structured data into the format expected by automation"""
-        # Use card's user info if available, otherwise fallback to pickup person
         user_info = card_data.get('user_info', {})
         billing_info = card_data.get('billing_info', {})
         
         return {
-            # Location data from settings
             'zip_code': settings_data['zip_code'],
             'street_address': settings_data['street_address'],
             'postal_code': settings_data['postal_code'],
-            
-            # Contact info - prioritize card's user info, fallback to pickup person
             'first_name': user_info.get('first_name', person_data['first_name']),
             'last_name': user_info.get('last_name', person_data['last_name']),
             'email': user_info.get('email', person_data['email']),
             'phone': user_info.get('phone', person_data['phone']),
-            
-            # Payment data from card
             'credit_card': card_data['card_number'],
             'expiry_date': card_data['expiry_date'],
             'cvc': card_data['cvc'],
-            
-            # Billing address from card's billing info
             'billing_first_name': billing_info.get('first_name', user_info.get('first_name', person_data['first_name'])),
             'billing_last_name': billing_info.get('last_name', user_info.get('last_name', person_data['last_name'])),
             'billing_street_address': billing_info.get('street_address', settings_data['street_address']),
@@ -62,7 +47,6 @@ class AppleAutomation:
         }
         
     def setup_driver(self):
-        """Initialize the Chrome driver with options"""
         options = webdriver.ChromeOptions()
         for option in self.config.BROWSER_OPTIONS:
             options.add_argument(option)
@@ -72,526 +56,579 @@ class AppleAutomation:
         self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
     def stop(self):
-        """Stop the automation"""
         self._stopped = True
         if self.driver:
             try:
                 self.driver.quit()
             except:
                 pass
-        
-    def wait_and_click(self, selectors, element_name, timeout=None):
-        """Wait for element and click it using multiple selector strategies"""
+
+    def click_element(self, selector, element_name, timeout=10):
         if self._stopped:
             return False
-            
-        if timeout is None:
-            timeout = self.config.ELEMENT_TIMEOUT
-            
-        if isinstance(selectors, str):
-            selectors = [selectors]
-            
-        for selector in selectors:
-            if self._stopped:
-                return False
-            try:
-                element = WebDriverWait(self.driver, timeout).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
-                )
-                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-                time.sleep(self.config.SHORT_WAIT)
-                element.click()
-                print(f"{element_name} clicked successfully using selector: {selector}")
-                return True
-            except:
-                continue
         
-        # Fallback: try finding by text
         try:
-            if not self._stopped:
-                all_buttons = self.driver.find_elements(By.TAG_NAME, "button")
-                for btn in all_buttons:
-                    if self._stopped:
-                        return False
-                    if btn.is_displayed() and btn.is_enabled():
-                        btn_text = btn.text.strip().lower()
-                        if any(keyword in btn_text for keyword in element_name.lower().split()):
-                            btn.click()
-                            print(f"{element_name} clicked successfully (text search method)")
-                            return True
-        except Exception as e:
-            print(f"Text search method failed: {e}")
-        
-        print(f"Could not find {element_name}")
-        return False
-    
-    def fill_input_field(self, selectors, value, field_name):
-        """Fill input field using multiple selector strategies"""
-        if self._stopped:
-            return False
-            
-        if isinstance(selectors, str):
-            selectors = [selectors]
-            
-        for selector in selectors:
-            if self._stopped:
-                return False
-            try:
-                field = WebDriverWait(self.driver, self.config.ELEMENT_TIMEOUT).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
-                )
-                self.driver.execute_script("arguments[0].focus();", field)
-                field.clear()
-                field.send_keys(value)
-                print(f"{field_name} entered: {value}")
-                return True
-            except:
-                continue
-        
-        print(f"Could not find {field_name} field")
-        return False
-    
-    def analyze_store_availability(self):
-        """Analyze store availability and select first available store"""
-        if self._stopped:
-            return False
-            
-        try:
-            store_elements = WebDriverWait(self.driver, self.config.ELEMENT_TIMEOUT).until(
-                EC.presence_of_all_elements_located((By.CSS_SELECTOR, self.config.SELECTORS['store_elements']))
+            element = WebDriverWait(self.driver, timeout).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
             )
-            
-            print(f"STORE AVAILABILITY ANALYSIS")
-            print(f"Found {len(store_elements)} stores in the area:")
-            print("-" * 50)
-            
-            available_stores = []
-            unavailable_stores = []
-            
-            for i, store in enumerate(store_elements, 1):
-                if self._stopped:
-                    return False
-                try:
-                    store_name_elem = store.find_element(By.CSS_SELECTOR, self.config.SELECTORS['store_name'])
-                    store_name = store_name_elem.text.strip()
-                    
-                    try:
-                        location_elem = store.find_element(By.CSS_SELECTOR, self.config.SELECTORS['store_location'])
-                        location = location_elem.text.strip()
-                    except:
-                        location = "Location not found"
-                    
-                    # Check availability
-                    store_text = store.text
-                    if "Available Today" in store_text:
-                        available_stores.append({
-                            'name': store_name,
-                            'location': location,
-                            'availability': "Available Today",
-                            'element': store
-                        })
-                        print(f"AVAILABLE: {store_name}")
-                        print(f"  Location: {location}")
-                        print(f"  Status: Available Today")
-                        print()
-                    else:
-                        availability = "Currently unavailable" if "unavailable" in store_text else "Status unknown"
-                        unavailable_stores.append({
-                            'name': store_name,
-                            'location': location,
-                            'availability': availability
-                        })
-                
-                except Exception as e:
-                    print(f"Error processing store {i}: {e}")
-                    continue
-            
-            print("=" * 50)
-            print("AVAILABILITY ANALYTICS:")
-            print(f"Total stores found: {len(store_elements)}")
-            print(f"Available today: {len(available_stores)}")
-            print(f"Currently unavailable: {len(unavailable_stores)}")
-            
-            if available_stores:
-                availability_rate = (len(available_stores) / len(store_elements)) * 100
-                print(f"Availability rate: {availability_rate:.1f}%")
-                
-                print(f"AVAILABLE LOCATIONS ({len(available_stores)} stores):")
-                for store in available_stores:
-                    print(f"  - {store['name']} - {store['location']}")
-                
-                # Select first available store
-                print(f"Selecting first available store: {available_stores[0]['name']}")
-                first_store = available_stores[0]['element']
-                
-                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", first_store)
-                time.sleep(self.config.SHORT_WAIT)
-                
-                try:
-                    store_radio = first_store.find_element(By.CSS_SELECTOR, self.config.SELECTORS['store_radio'])
-                    store_radio.click()
-                except:
-                    first_store.click()
-                
-                print(f"Selected store: {available_stores[0]['name']}")
-                return True
-            else:
-                print("No stores have the iPhone 16 Pro available for pickup today")
-                return False
-                
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+            time.sleep(0.5)
+            element.click()
+            print(f"✓ {element_name} clicked successfully")
+            return True
         except Exception as e:
-            print(f"Error analyzing store availability: {e}")
+            print(f"✗ Could not find {element_name}: {str(e)}")
             return False
-    
-    def select_pickup_time(self):
-        """Select first available pickup time slot"""
+
+    def click_applecare_no_coverage(self):
         if self._stopped:
             return False
-            
-        for selector in self.config.SELECTORS['pickup_time_dropdown']:
-            if self._stopped:
-                return False
-            try:
-                dropdown = WebDriverWait(self.driver, self.config.ELEMENT_TIMEOUT).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
-                )
-                
-                print(f"Found pickup time dropdown using selector: {selector}")
-                
-                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", dropdown)
-                time.sleep(self.config.SHORT_WAIT)
-                
-                select_obj = Select(dropdown)
-                options = select_obj.options
-                
-                print(f"Found {len(options)} time slot options:")
-                for i, option in enumerate(options):
-                    option_text = option.text.strip()
-                    option_value = option.get_attribute('value')
-                    if option_text:
-                        print(f"  Option {i}: '{option_text}' (value: {option_value})")
-                
-                # Select first available option
-                for option in options:
-                    if self._stopped:
-                        return False
-                    option_text = option.text.strip()
-                    option_value = option.get_attribute('value')
-                    
-                    if (option_text and 
-                        option_value and 
-                        option_value != "disabled" and
-                        "Select" not in option_text and
-                        "Available Windows" not in option_text and
-                        not option.get_attribute('disabled')):
-                        
-                        try:
-                            select_obj.select_by_value(option_value)
-                            print(f"Selected time slot: '{option_text}' with value: {option_value}")
-                            return True
-                        except Exception as e:
-                            continue
-                
-                # Fallback: select by index
-                if len(options) > 1:
-                    select_obj.select_by_index(1)
-                    print(f"Selected time slot by index: '{options[1].text.strip()}'")
-                    return True
-                    
-            except:
-                continue
         
-        print("Could not find pickup time slot dropdown")
-        return False
-    
-    def fill_contact_form(self):
-        """Fill out the contact information form using primary pickup person data"""
-        if self._stopped:
-            return False
-            
-        print("Filling out contact form with pickup person information...")
+        print("Looking for AppleCare no coverage option...")
         
-        # Fill contact fields - these should be the pickup person's details
-        fields = [
-            (self.config.SELECTORS['first_name'], self.user_data['first_name'], "First name"),
-            (self.config.SELECTORS['last_name'], self.user_data['last_name'], "Last name"),
-            (self.config.SELECTORS['email'], self.user_data['email'], "Email"),
-            (self.config.SELECTORS['phone'], self.user_data['phone'], "Phone")
+        methods = [
+            lambda: self._click_applecare_by_name(),
+            lambda: self._click_applecare_by_selector(),
+            lambda: self._click_applecare_by_text()
         ]
         
-        for selectors, value, field_name in fields:
-            if self._stopped:
-                return False
-            self.fill_input_field(selectors, value, field_name)
-            time.sleep(0.5)
-        
-        # Submit form by pressing Enter on phone field
+        for i, method in enumerate(methods, 1):
+            print(f"Trying method {i} for AppleCare...")
+            if method():
+                return True
+                
+        print("Could not find AppleCare no coverage option")
+        return False
+    
+    def _click_applecare_by_name(self):
         try:
-            for selector in self.config.SELECTORS['phone']:
-                if self._stopped:
-                    return False
+            radios = self.driver.find_elements(By.NAME, "applecare-options")
+            if len(radios) >= 3:
+                print(f"Found {len(radios)} AppleCare options, clicking third option (no coverage)")
+                radios[2].click()
+                time.sleep(1)
+                return True
+        except Exception as e:
+            print(f"Method 1 failed: {e}")
+        return False
+    
+    def _click_applecare_by_selector(self):
+        selectors = [
+            "[class*='applecare'][class*='no']",
+            "[data-autom*='noapple']",
+            "input[type='radio'][value*='no']",
+            ".rf-product-options input[type='radio']:last-child"
+        ]
+        
+        for selector in selectors:
+            try:
+                element = self.driver.find_element(By.CSS_SELECTOR, selector)
+                element.click()
+                time.sleep(1)
+                return True
+            except:
+                continue
+        return False
+    
+    def _click_applecare_by_text(self):
+        try:
+            elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'no coverage') or contains(text(), 'No coverage') or contains(text(), 'No AppleCare')]")
+            for element in elements:
                 try:
-                    phone_input = self.driver.find_element(By.CSS_SELECTOR, selector)
-                    phone_input.send_keys(Keys.RETURN)
-                    print("Pressed Enter to submit contact form")
-                    break
+                    radio = element.find_element(By.XPATH, ".//input[@type='radio'] | ./preceding-sibling::input[@type='radio'] | ./following-sibling::input[@type='radio']")
+                    radio.click()
+                    time.sleep(1)
+                    return True
                 except:
                     continue
         except:
             pass
-        return True
-    
-    def fill_billing_info(self):
-        """Fill billing information using pickup person's contact info"""
+        return False
+
+    def add_to_bag(self):
         if self._stopped:
             return False
-            
-        print("Filling billing information...")
         
-        # Click notification checkbox
-        self.wait_and_click(self.config.SELECTORS['notification_checkbox'], "notification checkbox")
-        
-        # Fill billing fields - use pickup person's contact info for billing contact
-        billing_fields = [
-            (self.config.SELECTORS['billing_email'], self.user_data['email'], "Billing email"),
-            (self.config.SELECTORS['billing_phone'], self.user_data['phone'], "Billing phone")
+        print("Clicking add to bag...")
+        selectors = [
+            'button[name="add-to-cart"]',
+            'button[data-autom="add-to-cart"]',
+            '.as-purchaseinfo-button button',
+            'form button[type="submit"]',
+            'button[class*="add-to-cart"]',
+            '.button[data-autom="add-to-cart"]'
         ]
         
-        for selectors, value, field_name in billing_fields:
-            if self._stopped:
-                return False
-            self.fill_input_field(selectors, value, field_name)
-            time.sleep(0.5)
-        return True
-    
-    def fill_payment_info(self):
-        """Fill payment information with enhanced billing address handling"""
+        for selector in selectors:
+            if self.click_element(selector, "Add to Bag"):
+                return True
+        
+        print("Could not find add to bag button")
+        return False
+
+    def handle_bag_page(self):
         if self._stopped:
             return False
             
-        print("Filling payment information...")
+        print("Waiting for bag page to load...")
+        time.sleep(3)
         
-        # Select credit payment option
-        try:
-            credit_radio = WebDriverWait(self.driver, 15).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, self.config.SELECTORS['credit_payment']))
-            )
-            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", credit_radio)
-            time.sleep(self.config.SHORT_WAIT)
-            self.driver.execute_script("arguments[0].click();", credit_radio)
-            print("CREDIT payment option selected successfully")
-            time.sleep(self.config.MEDIUM_WAIT)
-        except Exception as e:
-            print(f"Error selecting credit payment: {e}")
-            return False
+        self.purchase_count += 1
+        print(f"✓ iPhone {self.purchase_count} added to bag")
         
+        if self.purchase_count < self.max_purchases:
+            print(f"Going back for iPhone {self.purchase_count + 1}...")
+            time.sleep(2)
+            self.driver.get(self.saved_link)
+            time.sleep(3)
+            return self.run_purchase_flow()
+        else:
+            print("All iPhones added, proceeding to checkout")
+            return self.proceed_to_checkout()
+
+    def proceed_to_checkout(self):
         if self._stopped:
             return False
         
-        # Fill credit card fields
+        print("Looking for checkout button...")
+        proceed_selectors = [
+            'button[name="proceed"]',
+            'button[data-autom="proceed"]',
+            '.button.button-block[data-autom="proceed"]',
+            'form button[type="submit"]',
+            'button[class*="button-block"]'
+        ]
+        
+        for selector in proceed_selectors:
+            if self.click_element(selector, "Proceed to Checkout"):
+                time.sleep(3)
+                return self.handle_checkout_flow()
+        
+        print("Could not find proceed button")
+        return False
+
+    def handle_checkout_flow(self):
+        if self._stopped:
+            return False
+        
+        print("Handling checkout flow...")
+        time.sleep(3)
+        
+        checkout_selectors = [
+            'button[id="shoppingCart.actions.navCheckoutOtherPayments"]',
+            'button.button.button-block.rs-bag-checkout-otheroptions',
+            '.rs-bag-checkoutbutton button',
+            'button[class*="checkout"]',
+            '.rs-bag-checkoutbuttons-wrapper button',
+            'button[type="button"][class*="button-block"]'
+        ]
+        
+        for selector in checkout_selectors:
+            if self.click_element(selector, "Checkout"):
+                time.sleep(3)
+                return self.handle_guest_login()
+        
+        print("Could not find checkout button")
+        return False
+
+    def handle_guest_login(self):
+        if self._stopped:
+            return False
+        
+        print("Handling guest login...")
+        guest_selectors = [
+            'button[data-autom="guest-checkout-btn"]',
+            'button[id="signin.guestLogin.guestLogin"]',
+            '.form-button[data-autom="guest-checkout-btn"]',
+            'button[class*="guest-checkout"]',
+            '.rs-sign-in-sidebar button',
+            'button[type="button"][class*="form-button"]'
+        ]
+        
+        for selector in guest_selectors:
+            if self.click_element(selector, "Continue as Guest"):
+                time.sleep(3)
+                return self.continue_after_guest_login()
+        
+        print("Could not find guest login button")
+        return False
+
+    def click_element_reliably(self, element, description="element"):
+        methods = [
+            ("JavaScript click", lambda: self.driver.execute_script("arguments[0].click();", element)),
+            ("ActionChains click", lambda: ActionChains(self.driver).move_to_element(element).click().perform()),
+            ("Regular click", lambda: element.click()),
+            ("Send ENTER key", lambda: element.send_keys(Keys.RETURN)),
+            ("Send SPACE key", lambda: element.send_keys(Keys.SPACE))
+        ]
+        
+        for method_name, method in methods:
+            try:
+                print(f"Trying {method_name} on {description}...")
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+                time.sleep(0.5)
+                method()
+                print(f"Successfully clicked {description} using {method_name}")
+                return True
+            except Exception as e:
+                print(f"{method_name} failed: {e}")
+                continue
+        
+        print(f"All click methods failed for {description}")
+        return False
+
+    def wait_and_click_no_coverage(self):
+        print("Looking for no coverage option...")
+        
         try:
-            card_fields = [
-                (self.config.SELECTORS['card_number'], self.user_data['credit_card'], "Credit card number"),
-                (self.config.SELECTORS['expiry'], self.user_data['expiry_date'], "Expiry date"),
-                (self.config.SELECTORS['cvc'], self.user_data['cvc'], "CVC")
+            print("Trying exact ID: applecare-selector-no-applecare-option")
+            element = self.driver.find_element(By.ID, "applecare-selector-no-applecare-option")
+            if element.is_displayed():
+                print("Found element with exact ID, trying multiple click methods...")
+                if self.click_and_verify_selection(element, "no applecare radio input"):
+                    return True
+        except Exception as e:
+            print(f"Exact ID failed: {e}")
+        
+        try:
+            print("Trying label for no applecare option")
+            label = self.driver.find_element(By.CSS_SELECTOR, "label[for='applecare-selector-no-applecare-option']")
+            if label.is_displayed():
+                print("Found label, trying click...")
+                if self.click_and_verify_selection(label, "no applecare label"):
+                    return True
+        except Exception as e:
+            print(f"Label click failed: {e}")
+        
+        try:
+            print("Searching all radio inputs...")
+            radios = self.driver.find_elements(By.CSS_SELECTOR, "input[type='radio']")
+            print(f"Found {len(radios)} radio inputs")
+            
+            for i, radio in enumerate(radios):
+                try:
+                    radio_id = radio.get_attribute('id')
+                    radio_value = radio.get_attribute('value')
+                    radio_name = radio.get_attribute('name')
+                    radio_autom = radio.get_attribute('data-autom')
+                    print(f"Radio {i+1}: id='{radio_id}', value='{radio_value}', name='{radio_name}', data-autom='{radio_autom}'")
+                    
+                    if radio.is_displayed() and (
+                        (radio_id and 'no' in radio_id.lower() and 'applecare' in radio_id.lower()) or
+                        (radio_value and 'no' in radio_value.lower()) or
+                        (radio_autom and 'noapplecare' in radio_autom.lower())
+                    ):
+                        print(f"Found matching radio: {radio_id}")
+                        if self.click_and_verify_selection(radio, f"radio {i+1}"):
+                            return True
+                except Exception as e:
+                    print(f"Error checking radio {i+1}: {e}")
+        except Exception as e:
+            print(f"Radio search failed: {e}")
+        
+        print("Could not find or successfully click 'no coverage' option")
+        return False
+
+    def click_and_verify_selection(self, element, description):
+        click_methods = [
+            ("Regular click", lambda: element.click()),
+            ("JavaScript click", lambda: self.driver.execute_script("arguments[0].click();", element)),
+            ("ActionChains click", lambda: ActionChains(self.driver).move_to_element(element).click().perform()),
+            ("Force JavaScript", lambda: self.driver.execute_script("arguments[0].checked = true; arguments[0].dispatchEvent(new Event('change'));", element)),
+            ("Double click", lambda: ActionChains(self.driver).double_click(element).perform()),
+            ("Send SPACE key", lambda: element.send_keys(Keys.SPACE))
+        ]
+        
+        for method_name, method in click_methods:
+            try:
+                print(f"Trying {method_name} on {description}...")
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+                time.sleep(0.5)
+                
+                initial_checked = element.get_attribute('checked')
+                print(f"Initial checked state: {initial_checked}")
+                
+                method()
+                time.sleep(1)
+                
+                final_checked = element.get_attribute('checked')
+                print(f"Final checked state: {final_checked}")
+                
+                if final_checked == 'true' or final_checked == True:
+                    print(f"Successfully selected {description} using {method_name}")
+                    return True
+                else:
+                    print(f"{method_name} clicked but element not selected")
+                    
+            except Exception as e:
+                print(f"{method_name} failed: {e}")
+                continue
+        
+        print(f"All click methods failed to select {description}")
+        return False
+
+    def continue_after_guest_login(self):
+        if self._stopped:
+            return False
+        
+        print("Continuing after guest login - enhanced from direct-order.py...")
+        time.sleep(8)
+        
+        try:
+            WebDriverWait(self.driver, 15).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, ".rc-segmented-control-button"))
+            )
+            print("Segmented control buttons are now present")
+        except:
+            print("Timeout waiting for buttons, continuing anyway...")
+        
+        print("Direct approach: clicking second rc-segmented-control-button...")
+        try:
+            buttons = self.driver.find_elements(By.CSS_SELECTOR, ".rc-segmented-control-button")
+            print(f"Found {len(buttons)} rc-segmented-control-button elements")
+            
+            if len(buttons) >= 2:
+                button = buttons[1]
+                print(f"Attempting to click second button (index 1)")
+                
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+                time.sleep(1)
+                
+                initial_class = button.get_attribute('class')
+                print(f"Initial button class: {initial_class}")
+                
+                click_approaches = [
+                    ("Regular click", lambda: button.click()),
+                    ("JavaScript click", lambda: self.driver.execute_script("arguments[0].click();", button)),
+                    ("Force click with events", lambda: self.driver.execute_script("""
+                        arguments[0].dispatchEvent(new MouseEvent('click', {
+                            bubbles: true,
+                            cancelable: true,
+                            view: window
+                        }));
+                    """, button)),
+                    ("ActionChains click", lambda: ActionChains(self.driver).move_to_element(button).click().perform()),
+                    ("Focus and click", lambda: (self.driver.execute_script("arguments[0].focus();", button), button.click())[1])
+                ]
+                
+                for i, (approach_name, approach) in enumerate(click_approaches):
+                    try:
+                        print(f"Trying {approach_name}...")
+                        approach()
+                        time.sleep(2)
+                        
+                        final_class = button.get_attribute('class')
+                        print(f"Final button class: {final_class}")
+                        
+                        if 'selected' in final_class or 'active' in final_class:
+                            print(f"SUCCESS: Button state changed using {approach_name}!")
+                            print("Third party pickup selected successfully!")
+                            print("AUTOMATION STOPPED - Manual continuation required")
+                            time.sleep(300)
+                            return True
+                        else:
+                            print(f"{approach_name} - no visual change detected")
+                            
+                    except Exception as e:
+                        print(f"{approach_name} failed: {e}")
+                        continue
+                        
+                print("Trying all buttons systematically...")
+                for btn_index, btn in enumerate(buttons):
+                    try:
+                        print(f"Clicking button {btn_index + 1}...")
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
+                        time.sleep(0.5)
+                        
+                        initial_class = btn.get_attribute('class')
+                        self.driver.execute_script("arguments[0].click();", btn)
+                        time.sleep(2)
+                        final_class = btn.get_attribute('class')
+                        
+                        print(f"Button {btn_index + 1}: {initial_class} -> {final_class}")
+                        
+                        if 'selected' in final_class or 'active' in final_class:
+                            print(f"SUCCESS: Button {btn_index + 1} was selected!")
+                            print("AUTOMATION STOPPED - Manual continuation required")
+                            time.sleep(300)
+                            return True
+                            
+                    except Exception as e:
+                        print(f"Button {btn_index + 1} click failed: {e}")
+                        continue
+                        
+        except Exception as e:
+            print(f"Direct approach failed: {e}")
+        
+        print("Alternative: looking for any clickable elements in the area...")
+        try:
+            clickable_elements = self.driver.find_elements(By.CSS_SELECTOR, 
+                ".rc-segmented-control button, .rc-segmented-control-item button, button[role='radio']")
+            
+            for i, element in enumerate(clickable_elements):
+                try:
+                    print(f"Trying clickable element {i+1}...")
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+                    time.sleep(0.5)
+                    self.driver.execute_script("arguments[0].click();", element)
+                    time.sleep(2)
+                    
+                    if self.verify_third_party_selection():
+                        print(f"SUCCESS: Element {i+1} worked!")
+                        print("AUTOMATION STOPPED - Manual continuation required")
+                        time.sleep(300)
+                        return True
+                        
+                except Exception as e:
+                    print(f"Element {i+1} failed: {e}")
+                    continue
+                    
+        except Exception as e:
+            print(f"Alternative approach failed: {e}")
+        
+        print("Could not find or click third party pickup button")
+        print("AUTOMATION STOPPED - Manual intervention required")
+        time.sleep(300)
+        return False
+
+    def verify_third_party_selection(self):
+        try:
+            indicators = [
+                "input[name*='pickupPersonFirstName']",
+                "input[name*='pickupPersonLastName']", 
+                "input[id*='thirdParty']",
+                "input[id*='pickupPerson']",
+                "//*[contains(text(), 'pickup person') or contains(text(), 'authorized person')]",
+                ".rc-segmented-control-button[aria-pressed='true']",
+                ".rc-segmented-control-button.selected",
+                ".rc-segmented-control-button[data-selected='true']"
             ]
             
-            for selector, value, field_name in card_fields:
-                if self._stopped:
-                    return False
-                if self.fill_input_field(selector, value, field_name):
-                    time.sleep(self.config.SHORT_WAIT)
+            for indicator in indicators:
+                try:
+                    if indicator.startswith("//"):
+                        elements = self.driver.find_elements(By.XPATH, indicator)
+                    else:
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, indicator)
+                    
+                    if elements:
+                        print(f"Found indicator of third party selection: {indicator}")
+                        return True
+                except:
+                    continue
+            
+            page_source = self.driver.page_source.lower()
+            third_party_keywords = ["pickup person", "authorized person", "someone else", "third party"]
+            
+            for keyword in third_party_keywords:
+                if keyword in page_source:
+                    print(f"Found third party keyword in page: {keyword}")
+                    return True
+                    
+            return False
             
         except Exception as e:
-            print(f"Error filling credit card fields: {e}")
-        
+            print(f"Error verifying third party selection: {e}")
+            return False
+
+    def verify_third_party_selection(self):
+        try:
+            indicators = [
+                "input[name*='pickupPersonFirstName']",
+                "input[name*='pickupPersonLastName']", 
+                "input[id*='thirdParty']",
+                "input[id*='pickupPerson']",
+                "//*[contains(text(), 'pickup person') or contains(text(), 'authorized person')]",
+                ".rc-segmented-control-button[aria-pressed='true']",
+                ".rc-segmented-control-button.selected",
+                ".rc-segmented-control-button[data-selected='true']"
+            ]
+            
+            for indicator in indicators:
+                try:
+                    if indicator.startswith("//"):
+                        elements = self.driver.find_elements(By.XPATH, indicator)
+                    else:
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, indicator)
+                    
+                    if elements:
+                        print(f"Found indicator of third party selection: {indicator}")
+                        return True
+                except:
+                    continue
+            
+            page_source = self.driver.page_source.lower()
+            third_party_keywords = ["pickup person", "authorized person", "someone else", "third party"]
+            
+            for keyword in third_party_keywords:
+                if keyword in page_source:
+                    print(f"Found third party keyword in page: {keyword}")
+                    return True
+                    
+            return False
+            
+        except Exception as e:
+            print(f"Error verifying third party selection: {e}")
+            return False
+
+    def run_purchase_flow(self):
         if self._stopped:
             return False
         
-        # Fill billing address using the enhanced billing data
-        print("Filling billing address information...")
-        billing_address_fields = [
-            (self.config.SELECTORS['billing_first_name'], 
-             self.user_data.get('billing_first_name', self.user_data['first_name']), 
-             "Billing first name"),
-            (self.config.SELECTORS['billing_last_name'], 
-             self.user_data.get('billing_last_name', self.user_data['last_name']), 
-             "Billing last name"),
-            (self.config.SELECTORS['billing_street'], 
-             self.user_data.get('billing_street_address', self.user_data['street_address']), 
-             "Billing street address"),
-            (self.config.SELECTORS['billing_postal_code'], 
-             self.user_data.get('billing_postal_code', self.user_data['postal_code']), 
-             "Billing postal code")
-        ]
+        print(f"Starting purchase flow for iPhone {self.purchase_count + 1}...")
         
-        for selector, value, field_name in billing_address_fields:
-            if self._stopped:
-                return False
-            if self.fill_input_field(selector, value, field_name):
-                time.sleep(0.5)
+        self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight * 0.25);")
+        time.sleep(2)
         
-        return True
-    
+        if not self.click_applecare_no_coverage():
+            print("❌ Failed to select no coverage")
+            return False
+        
+        time.sleep(1)
+        
+        if not self.add_to_bag():
+            print("❌ Failed to add to bag")
+            return False
+        
+        time.sleep(2)
+        return self.handle_bag_page()
+
     def run(self):
-        """Main automation workflow with enhanced data handling"""
         try:
-            print("Starting Apple website automation...")
-            print(f"Using contact info: {self.user_data['first_name']} {self.user_data['last_name']}")
-            print(f"Using billing info: {self.user_data.get('billing_first_name', 'Same as contact')} {self.user_data.get('billing_last_name', 'Same as contact')}")
+            print("🎯 Starting Apple automation...")
+            print(f"📱 Target: {self.max_purchases} iPhones")
+            print(f"👤 Contact: {self.user_data['first_name']} {self.user_data['last_name']}")
+            print(f"📍 Zip Code: {self.user_data['zip_code']}")
             
-            # Setup driver
             self.setup_driver()
             
             if self._stopped:
                 return False
             
-            # Navigate to product page
-            print("Opening Apple website...")
+            print("🌐 Opening Apple website...")
             self.driver.get(self.config.PRODUCT_URL)
-            WebDriverWait(self.driver, self.config.PAGE_LOAD_TIMEOUT).until(
+            WebDriverWait(self.driver, 20).until(
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
-            print("Page loaded successfully")
+            print("✅ Page loaded successfully")
             
-            if self._stopped:
+            self.saved_link = self.driver.current_url
+            print(f"💾 Saved page URL: {self.saved_link}")
+            
+            if not self.run_purchase_flow():
+                print("❌ Purchase flow failed")
                 return False
             
-            # Scroll to load content
-            print("Scrolling down to load content...")
-            self.driver.execute_script(f"window.scrollTo(0, document.body.scrollHeight * {self.config.SCROLL_PERCENTAGE});")
-            time.sleep(self.config.MEDIUM_WAIT)
-            
-            # Click AppleCare option
-            print("Clicking AppleCare option...")
-            if not self.wait_and_click(self.config.SELECTORS['applecare_no'], "AppleCare option"):
-                return False
-            
-            # Click pickup button
-            print("Looking for pickup button...")
-            time.sleep(self.config.MEDIUM_WAIT)
-            if not self.wait_and_click(self.config.SELECTORS['pickup_button'], "Pickup button"):
-                return False
-            
-            # Enter zip code
-            print("Looking for zip code input field...")
-            time.sleep(self.config.MEDIUM_WAIT)
-            if not self.fill_input_field(self.config.SELECTORS['zip_input'], self.user_data['zip_code'], "Zip code"):
-                return False
-            
-            # Submit zip code
-            zip_input = self.driver.find_element(By.CSS_SELECTOR, self.config.SELECTORS['zip_input'])
-            zip_input.send_keys(Keys.RETURN)
-            print("Pressing Enter to search stores")
-            
-            # Wait for store results and analyze availability
-            print("Waiting for store results to load...")
-            time.sleep(self.config.LONG_WAIT)
-            
-            if not self.analyze_store_availability():
-                return False
-            
-            # Continue with pickup
-            time.sleep(self.config.MEDIUM_WAIT)
-            if not self.wait_and_click(self.config.SELECTORS['continue_pickup'], "Continue button"):
-                return False
-            
-            # Add to bag
-            print("Waiting for next page to load...")
-            time.sleep(self.config.LONG_WAIT)
-            if not self.wait_and_click(self.config.SELECTORS['add_to_bag'], "Add to Bag button"):
-                return False
-            
-            # Review bag
-            print("Waiting for bag page to load...")
-            time.sleep(self.config.LONG_WAIT)
-            if not self.wait_and_click(self.config.SELECTORS['review_bag'], "Review Bag button"):
-                return False
-            
-            # Checkout
-            print("Waiting for checkout page to load...")
-            time.sleep(self.config.LONG_WAIT)
-            if not self.wait_and_click(self.config.SELECTORS['checkout'], "Checkout button"):
-                return False
-            
-            # Continue as guest
-            print("Waiting for guest checkout option...")
-            time.sleep(self.config.LONG_WAIT)
-            if not self.wait_and_click(self.config.SELECTORS['guest_checkout'], "Continue as Guest button"):
-                return False
-            
-            # Select pickup time
-            print("Waiting for pickup time selection page...")
-            time.sleep(self.config.LONG_WAIT)
-            if not self.select_pickup_time():
-                return False
-            
-            # Continue to pickup person selection
-            print("Continuing to pickup person selection...")
-            time.sleep(self.config.MEDIUM_WAIT)
-            if not self.wait_and_click(self.config.SELECTORS['final_continue'], "Final Continue button"):
-                return False
-            
-            # Select third party pickup
-            print("Waiting for pickup person selection page...")
-            time.sleep(self.config.LONG_WAIT)
-            if not self.wait_and_click(self.config.SELECTORS['third_party_pickup'], "Someone else to pick up option"):
-                return False
-            
-            # Fill contact form with pickup person data
-            print("Filling contact form with pickup person information...")
-            time.sleep(self.config.MEDIUM_WAIT)
-            if not self.fill_contact_form():
-                return False
-            
-            # Fill billing info
-            print("Filling billing contact information...")
-            time.sleep(self.config.MEDIUM_WAIT)
-            if not self.fill_billing_info():
-                return False
-            
-            # Continue to payment
-            print("Proceeding to payment section...")
-            time.sleep(self.config.MEDIUM_WAIT)
-            if not self.wait_and_click(self.config.SELECTORS['continue_payment'], "Continue to Payment button"):
-                return False
-            
-            # Fill payment information with enhanced billing
-            time.sleep(self.config.MEDIUM_WAIT)
-            if not self.fill_payment_info():
-                return False
-            
-            # Continue to review
-            print("Proceeding to order review...")
-            time.sleep(self.config.MEDIUM_WAIT)
-            if not self.wait_and_click("button[id='rs-checkout-continue-button-bottom']", "Continue to Review button"):
-                return False
-            
-            # Final continue on review page
-            print("Final step - order review...")
-            time.sleep(self.config.MEDIUM_WAIT)
-            if not self.wait_and_click("button[id='rs-checkout-continue-button-bottom']", "Continue button on review page"):
-                return False
-            
-            print("SUCCESS: All steps completed successfully!")
-            print("✅ Payment card user data and pickup person properly configured")
-            print("✅ Billing address information correctly filled")
-            print("✅ Primary pickup person selected for device collection")
-            print("Keeping browser open to see final results...")
-            time.sleep(self.config.FINAL_WAIT)
-            
+            print("🎉 SUCCESS: Automation completed up to third party pickup!")
             return True
             
         except Exception as e:
-            print(f"Error occurred: {e}")
+            print(f"💥 Error occurred: {e}")
             return False
         finally:
-            if self.driver:
-                self.driver.quit()
-                print("Browser closed.")
+            print("ℹ️ Browser will remain open for manual continuation...")
 
 
 if __name__ == "__main__":
-    # For testing with default values
     automation = AppleAutomation()
     automation.run()

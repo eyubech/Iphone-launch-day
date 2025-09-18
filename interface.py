@@ -1,10 +1,8 @@
-"""
-Clean Modern GUI - Complete Working Version with Scrollable Forms
-"""
-
 import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
+import multiprocessing
+import psutil
 from apple_automation import AppleAutomation
 from config import Config
 from database import DatabaseManager
@@ -17,27 +15,57 @@ class CleanModernGUI:
         self.root = tk.Tk()
         self.automation = None
         self.automation_thread = None
+        self.active_processes = []
+        self.max_processes = self._calculate_max_processes()
         
         self.setup_window()
         self.setup_styles()
         self.create_widgets()
         self.load_data()
         
+    def _calculate_max_processes(self):
+        cpu_count = multiprocessing.cpu_count()
+        memory_gb = psutil.virtual_memory().total / (1024**3)
+        
+        max_by_cpu = max(1, cpu_count // 2)
+        max_by_memory = max(1, int(memory_gb // 1.5))
+        
+        return min(max_by_cpu, max_by_memory, 8)
+
+    def get_zip_code_count(self):
+        try:
+            settings = self.db.get_all_settings()
+            unique_zips = set()
+            for setting in settings:
+                unique_zips.add(setting['zip_code'])
+            return len(unique_zips) if unique_zips else 1
+        except:
+            return 1
+
+    def update_process_limits(self):
+        zip_count = self.get_zip_code_count()
+        max_processes = max(zip_count, self.max_processes)
+        
+        self.process_count_spinbox.config(from_=zip_count, to=max_processes)
+        
+        if self.process_count_var.get() < zip_count:
+            self.process_count_var.set(zip_count)
+        
+        system_info = f"CPU Cores: {multiprocessing.cpu_count()}\nRAM: {psutil.virtual_memory().total / (1024**3):.1f}GB\nZip Codes: {zip_count}\nMin Processes: {zip_count}"
+        self.system_info_label.config(text=system_info)
+        
     def setup_window(self):
-        """Configure main window"""
         self.root.title("Apple iPhone Automation Pro")
         self.root.geometry("1200x800")
         self.root.configure(bg='#f8f9fa')
         self.root.resizable(True, True)
         
-        # Center window
         self.root.update_idletasks()
         x = (self.root.winfo_screenwidth() // 2) - (1200 // 2)
         y = (self.root.winfo_screenheight() // 2) - (800 // 2)
         self.root.geometry(f"1200x800+{x}+{y}")
         
     def setup_styles(self):
-        """Configure styling"""
         style = ttk.Style()
         style.theme_use('clam')
         
@@ -56,12 +84,15 @@ class CleanModernGUI:
                        foreground='white',
                        background='#ef4444')
         
+        style.configure('Warning.TButton',
+                       font=('Arial', 9),
+                       foreground='white',
+                       background='#f59e0b')
+        
     def create_widgets(self):
-        """Create main interface"""
         main_container = ttk.Frame(self.root, padding="10")
         main_container.pack(fill=tk.BOTH, expand=True)
         
-        # Header
         header_frame = ttk.Frame(main_container)
         header_frame.pack(fill=tk.X, pady=(0, 10))
         
@@ -69,15 +100,12 @@ class CleanModernGUI:
                                font=('Arial', 18, 'bold'), foreground='#2563eb')
         title_label.pack(side=tk.LEFT)
         
-        # Stats
         self.stats_frame = ttk.Frame(header_frame)
         self.stats_frame.pack(side=tk.RIGHT)
         
-        # Create notebook
         self.notebook = ttk.Notebook(main_container)
         self.notebook.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
         
-        # Create tabs
         self.create_automation_tab()
         self.create_cards_tab()
         self.create_persons_tab()
@@ -86,7 +114,6 @@ class CleanModernGUI:
         self.update_stats()
         
     def create_automation_tab(self):
-        """Create automation tab"""
         tab_frame = ttk.Frame(self.notebook)
         self.notebook.add(tab_frame, text="Automation")
         
@@ -94,15 +121,13 @@ class CleanModernGUI:
         main_frame.pack(fill=tk.BOTH, expand=True)
         main_frame.columnconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(1, weight=1)
+        main_frame.rowconfigure(2, weight=1)
         
-        # Top section
         top_frame = ttk.Frame(main_frame)
         top_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
         top_frame.columnconfigure(0, weight=1)
         top_frame.columnconfigure(1, weight=1)
         
-        # Selection display
         selection_frame = ttk.LabelFrame(top_frame, text="Current Selection", padding="10")
         selection_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N), padx=(0, 7))
         
@@ -122,7 +147,6 @@ class CleanModernGUI:
                                command=self.refresh_selection, style='Primary.TButton')
         refresh_btn.pack(pady=(10, 0))
         
-        # Controls
         control_frame = ttk.LabelFrame(top_frame, text="Controls", padding="10")
         control_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N), padx=(7, 0))
         
@@ -130,18 +154,75 @@ class CleanModernGUI:
                              command=self.test_selection, style='Primary.TButton')
         test_btn.pack(fill=tk.X, pady=2)
         
-        self.start_btn = ttk.Button(control_frame, text="Start Automation", 
-                                   command=self.start_automation, style='Success.TButton')
-        self.start_btn.pack(fill=tk.X, pady=2)
+        self.use_different_ip_var = tk.BooleanVar(value=False)
+        ip_check = ttk.Checkbutton(control_frame, text="Use different IP for each process", 
+                                  variable=self.use_different_ip_var)
+        ip_check.pack(fill=tk.X, pady=2)
         
-        self.stop_btn = ttk.Button(control_frame, text="Stop", 
-                                  command=self.stop_automation, style='Danger.TButton',
+        self.stop_btn = ttk.Button(control_frame, text="Stop All Processes", 
+                                  command=self.stop_all_automation, style='Danger.TButton',
                                   state='disabled')
         self.stop_btn.pack(fill=tk.X, pady=2)
+
+        multi_frame = ttk.LabelFrame(main_frame, text="Multi-Process Automation", padding="10")
+        multi_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        multi_frame.columnconfigure(0, weight=1)
+        multi_frame.columnconfigure(1, weight=1)
+        multi_frame.columnconfigure(2, weight=1)
         
-        # Console output
+        count_frame = ttk.Frame(multi_frame)
+        count_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 5))
+        
+        ttk.Label(count_frame, text="Number of Windows:", font=('Arial', 9, 'bold')).pack(anchor=tk.W)
+        
+        self.process_count_var = tk.IntVar(value=2)
+        self.process_count_spinbox = ttk.Spinbox(
+            count_frame, 
+            from_=1, 
+            to=self.max_processes, 
+            textvariable=self.process_count_var,
+            width=10,
+            command=self.validate_process_count
+        )
+        self.process_count_spinbox.pack(anchor=tk.W, pady=2)
+        
+        info_frame = ttk.Frame(multi_frame)
+        info_frame.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5)
+        
+        ttk.Label(info_frame, text="System Limits:", font=('Arial', 9, 'bold')).pack(anchor=tk.W)
+        
+        cpu_count = multiprocessing.cpu_count()
+        memory_gb = psutil.virtual_memory().total / (1024**3)
+        
+        system_info = f"CPU Cores: {cpu_count}\nRAM: {memory_gb:.1f}GB\nMax Recommended: {self.max_processes}"
+        self.system_info_label = ttk.Label(info_frame, text=system_info, 
+                                          font=('Arial', 8), foreground='#6b7280')
+        self.system_info_label.pack(anchor=tk.W, pady=2)
+        
+        controls_frame = ttk.Frame(multi_frame)
+        controls_frame.grid(row=0, column=2, sticky=(tk.W, tk.E), padx=(5, 0))
+        
+        ttk.Label(controls_frame, text="Multi-Process:", font=('Arial', 9, 'bold')).pack(anchor=tk.W)
+        
+        self.start_multi_btn = ttk.Button(controls_frame, text="Start Multiple", 
+                                         command=self.start_multi_automation, style='Warning.TButton')
+        self.start_multi_btn.pack(fill=tk.X, pady=2)
+        
+        self.stop_all_btn = ttk.Button(controls_frame, text="Stop All Processes", 
+                                      command=self.stop_all_processes, style='Danger.TButton',
+                                      state='disabled')
+        self.stop_all_btn.pack(fill=tk.X, pady=2)
+        
+        status_frame = ttk.Frame(multi_frame)
+        status_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(10, 0))
+        
+        ttk.Label(status_frame, text="Active Processes:", font=('Arial', 9, 'bold')).pack(anchor=tk.W)
+        self.process_status_label = ttk.Label(status_frame, text="No active processes", 
+                                             font=('Arial', 8), foreground='#6b7280')
+        self.process_status_label.pack(anchor=tk.W, pady=2)
+        
         console_frame = ttk.LabelFrame(main_frame, text="Automation Output", padding="10")
-        console_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S))
+        console_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S))
         console_frame.columnconfigure(0, weight=1)
         console_frame.rowconfigure(0, weight=1)
         
@@ -160,8 +241,138 @@ class CleanModernGUI:
         clear_btn = ttk.Button(console_controls, text="Clear Console", command=self.clear_console)
         clear_btn.pack(side=tk.LEFT)
         
+        warning_frame = ttk.Frame(main_frame)
+        warning_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+        
+        warning_text = f"WARNING: Running multiple processes will consume significant system resources. Each Chrome window uses ~1GB RAM. Recommended maximum: {self.max_processes} processes."
+        warning_label = ttk.Label(warning_frame, text=warning_text, 
+                                 font=('Arial', 8), foreground='#ef4444', wraplength=800)
+        warning_label.pack(anchor=tk.W)
+        
+    def validate_process_count(self):
+        count = self.process_count_var.get()
+        
+        if count > self.max_processes:
+            self.log_message(f"WARNING: {count} processes exceeds recommended maximum of {self.max_processes}")
+            self.log_message("This may cause system performance issues or crashes")
+        elif count > 4:
+            self.log_message(f"CAUTION: {count} processes will use significant resources")
+            
+        self.update_process_status()
+    
+    def start_multi_automation(self):
+        try:
+            count = self.process_count_var.get()
+            
+            card = self.db.get_all_cards()
+            person = self.db.get_primary_pickup_person()
+            settings = self.db.get_default_settings()
+            
+            if not card or not person or not settings:
+                messagebox.showerror("Error", "Missing required data. Please check your selection.")
+                return
+            
+            if count > self.max_processes:
+                if not messagebox.askyesno("Performance Warning", 
+                    f"You're about to start {count} processes, which exceeds the recommended maximum of {self.max_processes}.\n\n"
+                    f"This may cause:\n"
+                    f"• High memory usage (~{count * 1.5:.1f}GB RAM)\n"
+                    f"• System slowdown\n"
+                    f"• Browser crashes\n\n"
+                    f"Continue anyway?"):
+                    return
+            
+            self.start_multi_btn.config(state='disabled')
+            self.stop_all_btn.config(state='normal')
+            self.log_message(f"Starting {count} automation processes...")
+            
+            if self.use_different_ip_var.get():
+                self.log_message("Using different IP configuration for each process...")
+            
+            for i in range(count):
+                if i > 0:
+                    self.log_message(f"Starting process {i+1}/{count}...")
+                    import time
+                    time.sleep(2)
+                
+                automation = AppleAutomation(
+                    card_data=card[0],
+                    person_data=person,
+                    settings_data=settings
+                )
+                
+                thread = threading.Thread(target=self.run_multi_automation, args=(automation, i+1))
+                thread.daemon = True
+                thread.start()
+                
+                self.active_processes.append(f"Process {i+1}")
+            
+            self.update_process_status()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to start multi-automation: {str(e)}")
+            self.reset_automation_ui()
+    
+    def stop_all_processes(self):
+        try:
+            self.log_message("Stopping all automation processes...")
+            
+            self.active_processes.clear()
+            
+            self.reset_automation_ui()
+            self.log_message("All processes stopped")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to stop automation: {str(e)}")
+    
+    def reset_automation_ui(self):
+        self.start_multi_btn.config(state='normal')
+        self.stop_all_btn.config(state='disabled')
+        self.automation = None
+        self.automation_thread = None
+        self.active_processes.clear()
+        self.update_process_status()
+    
+    def run_multi_automation(self, automation, process_num):
+        try:
+            self.log_message(f"Process {process_num}: Starting automation...")
+            automation.run()
+            self.log_message(f"Process {process_num}: Completed successfully!")
+        except Exception as e:
+            self.log_message(f"Process {process_num}: Error - {str(e)}")
+        finally:
+            try:
+                self.active_processes.remove(f"Process {process_num}")
+            except:
+                pass
+            self.root.after(0, self.update_process_status)
+
+    def stop_all_automation(self):
+        try:
+            self.log_message("Stopping all automation processes...")
+            
+            if self.automation:
+                self.automation.stop()
+            
+            self.active_processes.clear()
+            
+            self.reset_automation_ui()
+            self.log_message("All processes stopped")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to stop automation: {str(e)}")
+    
+    def update_process_status(self):
+        if self.active_processes:
+            status_text = f"Active: {len(self.active_processes)} processes\n"
+            status_text += ", ".join(self.active_processes[:3])
+            if len(self.active_processes) > 3:
+                status_text += f" and {len(self.active_processes) - 3} more..."
+            self.process_status_label.config(text=status_text, foreground='#10b981')
+        else:
+            self.process_status_label.config(text="No active processes", foreground='#6b7280')
+    
     def create_cards_tab(self):
-        """Create cards tab"""
         tab_frame = ttk.Frame(self.notebook)
         self.notebook.add(tab_frame, text="Payment Cards")
         
@@ -171,13 +382,11 @@ class CleanModernGUI:
         main_frame.columnconfigure(1, weight=2)
         main_frame.rowconfigure(0, weight=1)
         
-        # Left - Add card form
         left_frame = ttk.LabelFrame(main_frame, text="Add New Payment Card", padding="10")
         left_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
         
         self.create_card_form(left_frame)
         
-        # Right - Cards list
         right_frame = ttk.LabelFrame(main_frame, text="Saved Payment Cards", padding="10")
         right_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0))
         right_frame.columnconfigure(0, weight=1)
@@ -186,13 +395,10 @@ class CleanModernGUI:
         self.create_cards_list(right_frame)
         
     def create_card_form(self, parent):
-        """Create card form with scrolling capability"""
-        # Create canvas and scrollbar for scrolling
         canvas = tk.Canvas(parent, highlightthickness=0)
         scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
         
-        # Configure scrolling
         scrollable_frame.bind(
             "<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
@@ -201,11 +407,9 @@ class CleanModernGUI:
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         
-        # Pack canvas and scrollbar
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
-        # Bind mousewheel to canvas for smooth scrolling
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
         
@@ -218,7 +422,6 @@ class CleanModernGUI:
         canvas.bind('<Enter>', _bind_to_mousewheel)
         canvas.bind('<Leave>', _unbind_from_mousewheel)
         
-        # Now create the form content in the scrollable frame
         self.card_vars = {}
         default_values = self.config.DEFAULT_VALUES
         
@@ -251,7 +454,6 @@ class CleanModernGUI:
         
         scrollable_frame.columnconfigure(1, weight=1)
         
-        # Button frame at the bottom
         button_frame = ttk.Frame(scrollable_frame)
         button_frame.grid(row=len(fields), column=0, columnspan=2, pady=15)
         
@@ -263,11 +465,9 @@ class CleanModernGUI:
                             command=self.add_card, style='Success.TButton')
         add_btn.pack(pady=3)
         
-        # Set minimum canvas height to ensure scrolling works properly
         canvas.configure(height=400)
         
     def create_cards_list(self, parent):
-        """Create cards list"""
         refresh_btn = ttk.Button(parent, text="Refresh", command=self.load_cards)
         refresh_btn.grid(row=0, column=0, sticky=tk.W, pady=(0, 10))
         
@@ -288,7 +488,6 @@ class CleanModernGUI:
         delete_btn.grid(row=2, column=0, sticky=tk.W, pady=(10, 0))
         
     def create_persons_tab(self):
-        """Create persons tab"""
         tab_frame = ttk.Frame(self.notebook)
         self.notebook.add(tab_frame, text="Pickup Persons")
         
@@ -298,13 +497,11 @@ class CleanModernGUI:
         main_frame.columnconfigure(1, weight=2)
         main_frame.rowconfigure(0, weight=1)
         
-        # Left - Add person form
         left_frame = ttk.LabelFrame(main_frame, text="Add New Pickup Person", padding="10")
         left_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
         
         self.create_person_form(left_frame)
         
-        # Right - Persons list
         right_frame = ttk.LabelFrame(main_frame, text="Saved Pickup Persons", padding="10")
         right_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0))
         right_frame.columnconfigure(0, weight=1)
@@ -313,13 +510,10 @@ class CleanModernGUI:
         self.create_persons_list(right_frame)
         
     def create_person_form(self, parent):
-        """Create person form with scrolling capability"""
-        # Create canvas and scrollbar for scrolling
         canvas = tk.Canvas(parent, highlightthickness=0)
         scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
         
-        # Configure scrolling
         scrollable_frame.bind(
             "<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
@@ -328,11 +522,9 @@ class CleanModernGUI:
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         
-        # Pack canvas and scrollbar
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
-        # Bind mousewheel to canvas for smooth scrolling
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
         
@@ -345,7 +537,6 @@ class CleanModernGUI:
         canvas.bind('<Enter>', _bind_to_mousewheel)
         canvas.bind('<Leave>', _unbind_from_mousewheel)
         
-        # Now create the form content in the scrollable frame
         explanation = ttk.Label(scrollable_frame, text="First person added becomes PRIMARY pickup person",
                                font=('Arial', 9), foreground='#2563eb', wraplength=250)
         explanation.pack(anchor=tk.W, pady=(5, 10), padx=5)
@@ -390,11 +581,9 @@ class CleanModernGUI:
                             command=self.add_person, style='Success.TButton')
         add_btn.grid(row=len(fields)+1, column=0, columnspan=2, pady=15)
         
-        # Set minimum canvas height
         canvas.configure(height=300)
         
     def create_persons_list(self, parent):
-        """Create persons list"""
         refresh_btn = ttk.Button(parent, text="Refresh", command=self.load_persons)
         refresh_btn.grid(row=0, column=0, sticky=tk.W, pady=(0, 10))
         
@@ -415,7 +604,6 @@ class CleanModernGUI:
         delete_btn.grid(row=2, column=0, sticky=tk.W, pady=(10, 0))
         
     def create_settings_tab(self):
-        """Create settings tab"""
         tab_frame = ttk.Frame(self.notebook)
         self.notebook.add(tab_frame, text="Settings")
         
@@ -425,13 +613,11 @@ class CleanModernGUI:
         main_frame.columnconfigure(1, weight=2)
         main_frame.rowconfigure(0, weight=1)
         
-        # Left - Add settings form
         left_frame = ttk.LabelFrame(main_frame, text="Add Location Settings", padding="10")
         left_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
         
         self.create_settings_form(left_frame)
         
-        # Right - Settings list
         right_frame = ttk.LabelFrame(main_frame, text="Saved Location Settings", padding="10")
         right_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0))
         right_frame.columnconfigure(0, weight=1)
@@ -440,13 +626,10 @@ class CleanModernGUI:
         self.create_settings_list(right_frame)
         
     def create_settings_form(self, parent):
-        """Create settings form with scrolling capability"""
-        # Create canvas and scrollbar for scrolling
         canvas = tk.Canvas(parent, highlightthickness=0)
         scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
         
-        # Configure scrolling
         scrollable_frame.bind(
             "<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
@@ -455,11 +638,9 @@ class CleanModernGUI:
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         
-        # Pack canvas and scrollbar
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
-        # Bind mousewheel to canvas for smooth scrolling
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
         
@@ -472,19 +653,27 @@ class CleanModernGUI:
         canvas.bind('<Enter>', _bind_to_mousewheel)
         canvas.bind('<Leave>', _unbind_from_mousewheel)
         
-        # Now create the form content in the scrollable frame
         self.settings_vars = {}
         default_values = self.config.DEFAULT_VALUES
         
+        ttk.Label(scrollable_frame, text="Zip Codes (one per line):", font=('Arial', 9, 'bold')).grid(
+            row=0, column=0, columnspan=2, sticky=tk.W, pady=(5, 2), padx=5)
+        
+        self.zip_codes_text = tk.Text(scrollable_frame, height=5, width=25, font=('Arial', 9))
+        self.zip_codes_text.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10), padx=5)
+        
+        if not self.db.get_all_settings():
+            self.zip_codes_text.insert('1.0', default_values['zip_code'])
+        
         fields = [
-            ("Zip Code:", "settings_zip_var", default_values['zip_code']),
             ("Street Address:", "settings_street_var", default_values['street_address']),
             ("Postal Code:", "settings_postal_var", default_values['postal_code'])
         ]
         
+        start_row = 2
         for i, (label, var_name, default_value) in enumerate(fields):
             ttk.Label(scrollable_frame, text=label, font=('Arial', 9)).grid(
-                row=i, column=0, sticky=tk.W, pady=5, padx=(5, 5))
+                row=start_row + i, column=0, sticky=tk.W, pady=5, padx=(5, 5))
             
             var = tk.StringVar()
             if not self.db.get_all_settings() and default_value:
@@ -492,7 +681,7 @@ class CleanModernGUI:
             self.settings_vars[var_name] = var
             
             entry = ttk.Entry(scrollable_frame, textvariable=var, font=('Arial', 9), width=25)
-            entry.grid(row=i, column=1, sticky=(tk.W, tk.E), pady=5, padx=(0, 5))
+            entry.grid(row=start_row + i, column=1, sticky=(tk.W, tk.E), pady=5, padx=(0, 5))
         
         scrollable_frame.columnconfigure(1, weight=1)
         
@@ -502,17 +691,15 @@ class CleanModernGUI:
             
         default_check = ttk.Checkbutton(scrollable_frame, text="Set as default location", 
                                        variable=self.is_default_var)
-        default_check.grid(row=len(fields), column=0, columnspan=2, sticky=tk.W, pady=5, padx=5)
+        default_check.grid(row=start_row + len(fields), column=0, columnspan=2, sticky=tk.W, pady=5, padx=5)
         
         add_btn = ttk.Button(scrollable_frame, text="Add Location", 
                             command=self.add_settings, style='Success.TButton')
-        add_btn.grid(row=len(fields)+1, column=0, columnspan=2, pady=15)
+        add_btn.grid(row=start_row + len(fields) + 1, column=0, columnspan=2, pady=15)
         
-        # Set minimum canvas height
-        canvas.configure(height=200)
+        canvas.configure(height=300)
         
     def create_settings_list(self, parent):
-        """Create settings list"""
         refresh_btn = ttk.Button(parent, text="Refresh", command=self.load_settings)
         refresh_btn.grid(row=0, column=0, sticky=tk.W, pady=(0, 10))
         
@@ -532,9 +719,7 @@ class CleanModernGUI:
                                command=self.delete_selected_settings, style='Danger.TButton')
         delete_btn.grid(row=2, column=0, sticky=tk.W, pady=(10, 0))
         
-    # Database operations
     def auto_fill_billing(self):
-        """Auto-fill billing from user info"""
         try:
             self.card_vars['billing_first_var'].set(self.card_vars['user_first_var'].get())
             self.card_vars['billing_last_var'].set(self.card_vars['user_last_var'].get())
@@ -549,7 +734,6 @@ class CleanModernGUI:
             messagebox.showerror("Error", f"Failed to copy: {str(e)}")
     
     def add_card(self):
-        """Add new card"""
         try:
             required_fields = [
                 'card_name_var', 'card_number_var', 'card_expiry_var', 'card_cvc_var',
@@ -625,7 +809,6 @@ class CleanModernGUI:
             messagebox.showerror("Error", f"Failed to add card: {str(e)}")
     
     def add_person(self):
-        """Add new person"""
         try:
             required_fields = ['person_name_var', 'person_first_var', 'person_last_var', 
                              'person_email_var', 'person_phone_var']
@@ -669,22 +852,33 @@ class CleanModernGUI:
             messagebox.showerror("Error", f"Failed to add person: {str(e)}")
     
     def add_settings(self):
-        """Add new settings"""
         try:
-            required_fields = ['settings_zip_var', 'settings_street_var', 'settings_postal_var']
+            zip_codes_text = self.zip_codes_text.get('1.0', tk.END).strip()
+            if not zip_codes_text:
+                messagebox.showerror("Error", "Please enter at least one zip code")
+                return
+            
+            zip_codes = [code.strip() for code in zip_codes_text.split('\n') if code.strip()]
+            if not zip_codes:
+                messagebox.showerror("Error", "Please enter valid zip codes")
+                return
+            
+            required_fields = ['settings_street_var', 'settings_postal_var']
             
             for field in required_fields:
                 if not self.settings_vars[field].get().strip():
                     messagebox.showerror("Error", "Please fill all fields")
                     return
             
-            self.db.add_settings(
-                zip_code=self.settings_vars['settings_zip_var'].get().strip(),
-                street_address=self.settings_vars['settings_street_var'].get().strip(),
-                postal_code=self.settings_vars['settings_postal_var'].get().strip(),
-                is_default=self.is_default_var.get()
-            )
+            for zip_code in zip_codes:
+                self.db.add_settings(
+                    zip_code=zip_code,
+                    street_address=self.settings_vars['settings_street_var'].get().strip(),
+                    postal_code=self.settings_vars['settings_postal_var'].get().strip(),
+                    is_default=self.is_default_var.get() and zip_code == zip_codes[0]
+                )
             
+            self.zip_codes_text.delete('1.0', tk.END)
             for var in self.settings_vars.values():
                 var.set("")
             self.is_default_var.set(False)
@@ -692,14 +886,21 @@ class CleanModernGUI:
             self.load_settings()
             self.update_stats()
             self.refresh_selection()
+            self.update_process_limits()
             
-            messagebox.showinfo("Success", "Settings added!")
+            messagebox.showinfo("Success", f"Added {len(zip_codes)} location settings!")
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to add settings: {str(e)}")
-    
+
+    def load_data(self):
+        self.load_cards()
+        self.load_persons()
+        self.load_settings()
+        self.refresh_selection()
+        self.update_process_limits()
+
     def delete_selected_card(self):
-        """Delete selected card"""
         try:
             selection = self.cards_listbox.curselection()
             if not selection:
@@ -720,7 +921,6 @@ class CleanModernGUI:
             messagebox.showerror("Error", f"Failed to delete card: {str(e)}")
     
     def delete_selected_person(self):
-        """Delete selected person"""
         try:
             selection = self.persons_listbox.curselection()
             if not selection:
@@ -741,7 +941,6 @@ class CleanModernGUI:
             messagebox.showerror("Error", f"Failed to delete person: {str(e)}")
     
     def delete_selected_settings(self):
-        """Delete selected settings"""
         try:
             selection = self.settings_listbox.curselection()
             if not selection:
@@ -756,20 +955,13 @@ class CleanModernGUI:
                     self.load_settings()
                     self.update_stats()
                     self.refresh_selection()
+                    self.update_process_limits()
                     messagebox.showinfo("Success", "Settings deleted!")
                     
         except Exception as e:
             messagebox.showerror("Error", f"Failed to delete settings: {str(e)}")
     
-    def load_data(self):
-        """Load all data"""
-        self.load_cards()
-        self.load_persons()
-        self.load_settings()
-        self.refresh_selection()
-    
     def load_cards(self):
-        """Load cards into listbox"""
         try:
             self.cards_listbox.delete(0, tk.END)
             cards = self.db.get_all_cards()
@@ -780,7 +972,6 @@ class CleanModernGUI:
             print(f"Error loading cards: {e}")
     
     def load_persons(self):
-        """Load persons into listbox"""
         try:
             self.persons_listbox.delete(0, tk.END)
             persons = self.db.get_all_pickup_persons()
@@ -790,23 +981,30 @@ class CleanModernGUI:
                 self.persons_listbox.insert(tk.END, display_text)
         except Exception as e:
             print(f"Error loading persons: {e}")
-    
+
     def load_settings(self):
-        """Load settings into listbox"""
         try:
             self.settings_listbox.delete(0, tk.END)
             settings = self.db.get_all_settings()
+            grouped_settings = {}
+            
             for setting in settings:
-                default_text = " (DEFAULT)" if setting['is_default'] else ""
-                display_text = f"{setting['zip_code']} - {setting['street_address']}{default_text}"
+                key = f"{setting['street_address']} - {setting['postal_code']}"
+                if key not in grouped_settings:
+                    grouped_settings[key] = []
+                grouped_settings[key].append(setting)
+            
+            for key, group in grouped_settings.items():
+                zip_codes = [s['zip_code'] for s in group]
+                default_text = " (DEFAULT)" if any(s['is_default'] for s in group) else ""
+                display_text = f"Zips: {', '.join(zip_codes)} - {key}{default_text}"
                 self.settings_listbox.insert(tk.END, display_text)
+                
         except Exception as e:
             print(f"Error loading settings: {e}")
     
     def update_stats(self):
-        """Update statistics display"""
         try:
-            # Clear existing stats
             for widget in self.stats_frame.winfo_children():
                 widget.destroy()
             
@@ -822,18 +1020,15 @@ class CleanModernGUI:
             print(f"Error updating stats: {e}")
     
     def refresh_selection(self):
-        """Refresh current selection display"""
         try:
-            # Check for default card
             cards = self.db.get_all_cards()
             if cards:
-                card = cards[0]  # First card as default
+                card = cards[0]
                 card_text = f"✓ Card: {card['name']} (*{card['card_number'][-4:]})"
                 self.card_selection_label.config(text=card_text, foreground='#10b981')
             else:
                 self.card_selection_label.config(text="No cards available", foreground='#ef4444')
             
-            # Check for primary person
             primary_person = self.db.get_primary_pickup_person()
             if primary_person:
                 person_text = f"✓ Person: {primary_person['name']} ({primary_person['first_name']} {primary_person['last_name']})"
@@ -841,7 +1036,6 @@ class CleanModernGUI:
             else:
                 self.person_selection_label.config(text="No pickup persons available", foreground='#ef4444')
             
-            # Check for default location
             default_settings = self.db.get_default_settings()
             if default_settings:
                 location_text = f"✓ Location: {default_settings['zip_code']} - {default_settings['street_address']}"
@@ -853,7 +1047,6 @@ class CleanModernGUI:
             print(f"Error refreshing selection: {e}")
     
     def test_selection(self):
-        """Test current selection"""
         try:
             card = self.db.get_all_cards()
             person = self.db.get_primary_pickup_person()
@@ -882,68 +1075,7 @@ All required data is available for automation!"""
         except Exception as e:
             messagebox.showerror("Error", f"Test failed: {str(e)}")
     
-    def start_automation(self):
-        """Start automation process"""
-        try:
-            # Validate selection
-            card = self.db.get_all_cards()
-            person = self.db.get_primary_pickup_person()
-            settings = self.db.get_default_settings()
-            
-            if not card or not person or not settings:
-                messagebox.showerror("Error", "Missing required data. Please check your selection.")
-                return
-            
-            # Update UI
-            self.start_btn.config(state='disabled')
-            self.stop_btn.config(state='normal')
-            self.log_message("Starting automation...")
-            
-            # Initialize automation
-            self.automation = AppleAutomation(
-                card_data=card[0],
-                person_data=person,
-                settings_data=settings
-            )
-            
-            # Start automation in separate thread
-            self.automation_thread = threading.Thread(target=self.run_automation)
-            self.automation_thread.daemon = True
-            self.automation_thread.start()
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to start automation: {str(e)}")
-            self.reset_automation_ui()
-    
-    def run_automation(self):
-        """Run automation in background thread"""
-        try:
-            self.automation.run()
-        except Exception as e:
-            self.log_message(f"Automation error: {str(e)}")
-        finally:
-            self.root.after(0, self.reset_automation_ui)
-    
-    def stop_automation(self):
-        """Stop automation process"""
-        try:
-            if self.automation:
-                self.automation.stop()
-                self.log_message("Stopping automation...")
-            self.reset_automation_ui()
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to stop automation: {str(e)}")
-    
-    def reset_automation_ui(self):
-        """Reset automation UI state"""
-        self.start_btn.config(state='normal')
-        self.stop_btn.config(state='disabled')
-        self.automation = None
-        self.automation_thread = None
-    
     def log_message(self, message):
-        """Log message to console"""
         try:
             self.console_text.insert(tk.END, f"{message}\n")
             self.console_text.see(tk.END)
@@ -952,11 +1084,9 @@ All required data is available for automation!"""
             print(f"Logging error: {e}")
     
     def clear_console(self):
-        """Clear console output"""
         self.console_text.delete(1.0, tk.END)
     
     def run(self):
-        """Start the GUI application"""
         try:
             self.root.mainloop()
         except Exception as e:
@@ -964,7 +1094,6 @@ All required data is available for automation!"""
 
 
 def main():
-    """Main application entry point"""
     try:
         app = CleanModernGUI()
         app.run()
