@@ -20,6 +20,12 @@ class Config:
     # Scroll settings
     SCROLL_PERCENTAGE = 0.22
     
+    # Bright Data Proxy Settings
+    BRIGHT_DATA_ZONE_ID = "c1d192d556b8961124809501eed5e00a8c15e1d92cacc015fec073ac301f4eb3"
+    BRIGHT_DATA_USERNAME = "ayoub@garraje.com"
+    BRIGHT_DATA_ENDPOINT = "zproxy.lum-superproxy.io"
+    BRIGHT_DATA_PORT = 22225
+    
     # Default values (can be overridden by user input)
     DEFAULT_VALUES = {
         'zip_code': '33165',
@@ -190,7 +196,5 @@ class Config:
         ]
     }
     
-    # Product URL
-    # PRODUCT_URL = "localhost:8000/apple"
     
     PRODUCT_URL =  "https://www.apple.com/shop/buy-iphone/iphone-17-pro/6.3-inch-display-256gb-deep-blue-unlocked"

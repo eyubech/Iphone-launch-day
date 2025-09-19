@@ -3,20 +3,123 @@ from tkinter import ttk, messagebox
 import threading
 import multiprocessing
 import psutil
-from apple_automation import AppleAutomation
-from config import Config
-from database import DatabaseManager
+import requests
+import random
+from email_manager import EmailManager
+
+
+class BrightDataProxy:
+    def __init__(self, config):
+        self.zone_id = config.BRIGHT_DATA_ZONE_ID
+        self.username = config.BRIGHT_DATA_USERNAME
+        self.endpoint = config.BRIGHT_DATA_ENDPOINT
+        self.port = config.BRIGHT_DATA_PORT
+        self.enabled = False
+        
+    def generate_session_id(self, process_num=1):
+        return f"session_{process_num}_{random.randint(1000, 9999)}"
+    
+    def get_proxy_auth(self, process_num=1):
+        session_id = self.generate_session_id(process_num)
+        auth_username = f"{self.username}-session-{session_id}"
+        return f"{auth_username}:{self.zone_id}"
+    
+    def get_proxy_url(self, process_num=1):
+        session_id = self.generate_session_id(process_num)
+        auth_username = f"{self.username}-session-{session_id}"
+        return f"http://{auth_username}:{self.zone_id}@{self.endpoint}:{self.port}"
+    
+    def test_proxy(self, process_num=1):
+        try:
+            session_id = self.generate_session_id(process_num)
+            auth_username = f"{self.username}-session-{session_id}"
+            auth_password = self.zone_id
+            
+            proxy_url = f"http://{auth_username}:{auth_password}@{self.endpoint}:{self.port}"
+            
+            proxies = {
+                'http': proxy_url,
+                'https': proxy_url
+            }
+            
+            print(f"Testing proxy: {self.endpoint}:{self.port}")
+            print(f"Auth username: {auth_username}")
+            print(f"Zone ID: {self.zone_id[:10]}...")
+            
+            response = requests.get('http://httpbin.org/ip', proxies=proxies, timeout=15)
+            
+            if response.status_code == 200:
+                data = response.json()
+                return True, data.get('origin', 'Connected')
+            else:
+                return False, f"HTTP {response.status_code}"
+                
+        except requests.exceptions.ProxyError as e:
+            error_msg = str(e)
+            if "407" in error_msg:
+                return False, "Proxy authentication failed: Check credentials in config.py"
+            elif "403" in error_msg:
+                return False, "Access forbidden: Check zone permissions"
+            elif "404" in error_msg:
+                return False, "Endpoint not found: Check endpoint URL"
+            else:
+                return False, f"Proxy error: {error_msg}"
+        except requests.exceptions.ConnectTimeout:
+            return False, "Connection timeout - check endpoint and port"
+        except requests.exceptions.Timeout:
+            return False, "Request timeout"
+        except requests.exceptions.ConnectionError as e:
+            return False, f"Connection error: Check internet connection"
+        except Exception as e:
+            return False, f"Error: {str(e)}"
+    
+    def get_chrome_proxy_options(self, process_num=1):
+        if not self.enabled:
+            return []
+        
+        session_id = self.generate_session_id(process_num)
+        auth_username = f"{self.username}-session-{session_id}"
+        
+        return [
+            f"--proxy-server=http://{self.endpoint}:{self.port}",
+            f"--proxy-auth={auth_username}:{self.zone_id}",
+            "--disable-web-security",
+            "--ignore-certificate-errors"
+        ]
+    
+    def enable_proxy(self):
+        self.enabled = True
+    
+    def disable_proxy(self):
+        self.enabled = False
+    
+    def is_enabled(self):
+        return self.enabled
 
 
 class CleanModernGUI:
     def __init__(self):
-        self.config = Config()
-        self.db = DatabaseManager()
+        try:
+            from config import Config
+            from database import DatabaseManager
+            from apple_automation import AppleAutomation
+            
+            self.config = Config()
+            self.db = DatabaseManager()
+            self.AppleAutomation = AppleAutomation
+            self.email_manager = EmailManager()
+        except ImportError as e:
+            messagebox.showerror("Import Error", f"Missing required files: {str(e)}")
+            return
+            
         self.root = tk.Tk()
         self.automation = None
         self.automation_thread = None
         self.active_processes = []
         self.max_processes = self._calculate_max_processes()
+        self.continuous_mode = False
+        self._stopped = False
+        self.proxy = BrightDataProxy(self.config)
         
         self.setup_window()
         self.setup_styles()
@@ -26,41 +129,15 @@ class CleanModernGUI:
     def _calculate_max_processes(self):
         cpu_count = multiprocessing.cpu_count()
         memory_gb = psutil.virtual_memory().total / (1024**3)
-        
         max_by_cpu = max(1, cpu_count // 2)
         max_by_memory = max(1, int(memory_gb // 1.5))
-        
         return min(max_by_cpu, max_by_memory, 8)
 
-    def get_zip_code_count(self):
-        try:
-            settings = self.db.get_all_settings()
-            unique_zips = set()
-            for setting in settings:
-                unique_zips.add(setting['zip_code'])
-            return len(unique_zips) if unique_zips else 1
-        except:
-            return 1
-
-    def update_process_limits(self):
-        zip_count = self.get_zip_code_count()
-        max_processes = max(zip_count, self.max_processes)
-        
-        self.process_count_spinbox.config(from_=zip_count, to=max_processes)
-        
-        if self.process_count_var.get() < zip_count:
-            self.process_count_var.set(zip_count)
-        
-        system_info = f"CPU Cores: {multiprocessing.cpu_count()}\nRAM: {psutil.virtual_memory().total / (1024**3):.1f}GB\nZip Codes: {zip_count}\nMin Processes: {zip_count}"
-        self.system_info_label.config(text=system_info)
-        
     def setup_window(self):
         self.root.title("Apple iPhone Automation Pro")
         self.root.geometry("1200x800")
         self.root.configure(bg='#f8f9fa')
         self.root.resizable(True, True)
-        
-        self.root.update_idletasks()
         x = (self.root.winfo_screenwidth() // 2) - (1200 // 2)
         y = (self.root.winfo_screenheight() // 2) - (800 // 2)
         self.root.geometry(f"1200x800+{x}+{y}")
@@ -68,26 +145,10 @@ class CleanModernGUI:
     def setup_styles(self):
         style = ttk.Style()
         style.theme_use('clam')
-        
-        style.configure('Success.TButton',
-                       font=('Arial', 9, 'bold'),
-                       foreground='white',
-                       background='#10b981')
-        
-        style.configure('Primary.TButton',
-                       font=('Arial', 9, 'bold'),
-                       foreground='white', 
-                       background='#2563eb')
-        
-        style.configure('Danger.TButton',
-                       font=('Arial', 9),
-                       foreground='white',
-                       background='#ef4444')
-        
-        style.configure('Warning.TButton',
-                       font=('Arial', 9),
-                       foreground='white',
-                       background='#f59e0b')
+        style.configure('Success.TButton', font=('Arial', 9, 'bold'), foreground='white', background='#10b981')
+        style.configure('Primary.TButton', font=('Arial', 9, 'bold'), foreground='white', background='#2563eb')
+        style.configure('Danger.TButton', font=('Arial', 9), foreground='white', background='#ef4444')
+        style.configure('Warning.TButton', font=('Arial', 9), foreground='white', background='#f59e0b')
         
     def create_widgets(self):
         main_container = ttk.Frame(self.root, padding="10")
@@ -110,8 +171,360 @@ class CleanModernGUI:
         self.create_cards_tab()
         self.create_persons_tab()
         self.create_settings_tab()
+        self.create_automation_tab()
+        self.create_email_manager_tab()
+
         
         self.update_stats()
+    
+    def load_data(self):
+        self.refresh_card_list()
+        self.refresh_person_list()
+        self.refresh_settings()
+        self.refresh_email_statistics()
+        self.refresh_email_usage()
+        self.update_email_preview()
+        self.update_selection_labels()
+        
+        
+    def refresh_email_statistics(self):
+        try:
+            stats = self.email_manager.get_email_statistics()
+            config = self.email_manager.get_email_config()
+            
+            self.email_stats_text.config(state='normal')
+            self.email_stats_text.delete(1.0, tk.END)
+            
+            stats_text = "Email System Statistics:\n\n"
+            
+            if config:
+                stats_text += f"Base Email: {config['base_email']}\n"
+                stats_text += f"Domain: {config['domain']}\n"
+                stats_text += f"Starting Number: {config['starting_number']}\n"
+                stats_text += f"Current Number: {config['current_number']}\n\n"
+            
+            stats_text += "Email Usage:\n"
+            stats_text += f"Active: {stats.get('active', 0)}\n"
+            stats_text += f"Completed: {stats.get('completed', 0)}\n"
+            stats_text += f"Blacklisted: {stats.get('blacklisted', 0)}\n"
+            stats_text += f"Total Used: {sum(stats.get(key, 0) for key in ['active', 'completed', 'blacklisted'])}"
+            
+            self.email_stats_text.insert(1.0, stats_text)
+            self.email_stats_text.config(state='disabled')
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to refresh email statistics: {str(e)}")
+
+    def refresh_email_usage(self):
+        try:
+            # Clear existing items
+            for item in self.email_usage_tree.get_children():
+                self.email_usage_tree.delete(item)
+            
+            usage_data = self.email_manager.get_all_email_usage()
+            
+            for usage in usage_data:
+                process_text = f"Process {usage['process_number']}" if usage['process_number'] else "Manual"
+                status = usage['status'].title()
+                assigned_time = usage['assigned_at'][:16] if usage['assigned_at'] else "N/A"
+                
+                self.email_usage_tree.insert('', 'end', values=(
+                    usage['email_address'],
+                    process_text,
+                    status,
+                    assigned_time
+                ))
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to refresh email usage: {str(e)}")
+
+    def reset_email_system(self):
+        try:
+            if messagebox.askyesno("Confirm Reset", 
+                                "This will delete ALL email usage data and reset the system.\n\nAre you sure?"):
+                self.email_manager.reset_email_system()
+                self.refresh_email_statistics()
+                self.refresh_email_usage()
+                self.update_email_preview()
+                messagebox.showinfo("Success", "Email system reset successfully!")
+                self.log_message("Email system reset - all usage data cleared")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to reset email system: {str(e)}")
+
+    def blacklist_manual_email(self):
+        try:
+            email = self.manual_email_var.get().strip()
+            if not email:
+                messagebox.showerror("Error", "Please enter an email address")
+                return
+            
+            if '@' not in email:
+                messagebox.showerror("Error", "Please enter a valid email address")
+                return
+            
+            self.email_manager.blacklist_email(email)
+            self.manual_email_var.set("")
+            self.refresh_email_statistics()
+            self.refresh_email_usage()
+            messagebox.showinfo("Success", f"Email {email} has been blacklisted")
+            self.log_message(f"Email blacklisted: {email}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to blacklist email: {str(e)}")
+    def create_email_manager_tab(self):
+        tab_frame = ttk.Frame(self.notebook)
+        self.notebook.add(tab_frame, text="Email Manager")
+        
+        main_frame = ttk.Frame(tab_frame, padding="15")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
+        main_frame.rowconfigure(2, weight=1)
+        
+        # Email Configuration
+        config_frame = ttk.LabelFrame(main_frame, text="Email Configuration", padding="10")
+        config_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        config_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(config_frame, text="Base Email:", font=('Arial', 9, 'bold')).grid(
+            row=0, column=0, sticky=tk.W, pady=5, padx=(0, 10))
+        
+        self.base_email_var = tk.StringVar(value="billing")
+        base_email_entry = ttk.Entry(config_frame, textvariable=self.base_email_var, font=('Arial', 9), width=20)
+        base_email_entry.grid(row=0, column=1, sticky=tk.W, pady=5, padx=(0, 10))
+        
+        ttk.Label(config_frame, text="Domain:", font=('Arial', 9, 'bold')).grid(
+            row=0, column=2, sticky=tk.W, pady=5, padx=(0, 10))
+        
+        self.domain_var = tk.StringVar(value="garraje.com")
+        domain_entry = ttk.Entry(config_frame, textvariable=self.domain_var, font=('Arial', 9), width=20)
+        domain_entry.grid(row=0, column=3, sticky=tk.W, pady=5, padx=(0, 10))
+        
+        ttk.Label(config_frame, text="Starting Number:", font=('Arial', 9, 'bold')).grid(
+            row=1, column=0, sticky=tk.W, pady=5, padx=(0, 10))
+        
+        self.starting_number_var = tk.IntVar(value=10)
+        starting_number_spinbox = ttk.Spinbox(config_frame, from_=1, to=9999, 
+                                            textvariable=self.starting_number_var, width=10)
+        starting_number_spinbox.grid(row=1, column=1, sticky=tk.W, pady=5, padx=(0, 10))
+        
+        save_config_btn = ttk.Button(config_frame, text="Save Configuration", 
+                                command=self.save_email_config, style='Success.TButton')
+        save_config_btn.grid(row=1, column=2, sticky=tk.W, pady=5, padx=(10, 0))
+        
+        reset_system_btn = ttk.Button(config_frame, text="Reset Email System", 
+                                    command=self.reset_email_system, style='Danger.TButton')
+        reset_system_btn.grid(row=1, column=3, sticky=tk.W, pady=5, padx=(10, 0))
+        
+        # Email Preview
+        preview_frame = ttk.Frame(config_frame)
+        preview_frame.grid(row=2, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=(10, 0))
+        
+        ttk.Label(preview_frame, text="Email Preview:", font=('Arial', 9, 'bold')).pack(anchor=tk.W)
+        self.email_preview_label = ttk.Label(preview_frame, text="billing10@garraje.com", 
+                                        font=('Arial', 10), foreground='#2563eb')
+        self.email_preview_label.pack(anchor=tk.W, pady=2)
+        
+        # Email Statistics
+        stats_frame = ttk.LabelFrame(main_frame, text="Email Statistics", padding="10")
+        stats_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N), pady=(0, 15), padx=(0, 7))
+        
+        self.email_stats_text = tk.Text(stats_frame, height=8, width=40, font=('Arial', 9), 
+                                    bg='#f8f9fa', state='disabled')
+        self.email_stats_text.pack(fill=tk.BOTH, expand=True)
+        
+        refresh_stats_btn = ttk.Button(stats_frame, text="Refresh Statistics", 
+                                    command=self.refresh_email_statistics, style='Primary.TButton')
+        refresh_stats_btn.pack(pady=(10, 0))
+        
+        # Email Usage List
+        usage_frame = ttk.LabelFrame(main_frame, text="Email Usage History", padding="10")
+        usage_frame.grid(row=1, column=1, sticky=(tk.W, tk.E, tk.N), pady=(0, 15), padx=(7, 0))
+        usage_frame.columnconfigure(0, weight=1)
+        usage_frame.rowconfigure(0, weight=1)
+        
+        # Create Treeview for email usage
+        columns = ('Email', 'Process', 'Status', 'Assigned')
+        self.email_usage_tree = ttk.Treeview(usage_frame, columns=columns, show='headings', height=10)
+        
+        for col in columns:
+            self.email_usage_tree.heading(col, text=col)
+            if col == 'Email':
+                self.email_usage_tree.column(col, width=200)
+            elif col == 'Process':
+                self.email_usage_tree.column(col, width=70)
+            elif col == 'Status':
+                self.email_usage_tree.column(col, width=100)
+            else:
+                self.email_usage_tree.column(col, width=150)
+        
+        usage_scrollbar = ttk.Scrollbar(usage_frame, orient=tk.VERTICAL, command=self.email_usage_tree.yview)
+        self.email_usage_tree.configure(yscrollcommand=usage_scrollbar.set)
+        
+        self.email_usage_tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        usage_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        
+        refresh_usage_btn = ttk.Button(usage_frame, text="Refresh Usage", 
+                                    command=self.refresh_email_usage, style='Primary.TButton')
+        refresh_usage_btn.grid(row=1, column=0, columnspan=2, pady=(10, 0))
+        
+        # Manual Email Management
+        manual_frame = ttk.LabelFrame(main_frame, text="Manual Email Management", padding="10")
+        manual_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        manual_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(manual_frame, text="Email Address:", font=('Arial', 9)).grid(
+            row=0, column=0, sticky=tk.W, pady=5, padx=(0, 10))
+        
+        self.manual_email_var = tk.StringVar()
+        manual_email_entry = ttk.Entry(manual_frame, textvariable=self.manual_email_var, 
+                                    font=('Arial', 9), width=30)
+        manual_email_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=5, padx=(0, 10))
+        
+        blacklist_manual_btn = ttk.Button(manual_frame, text="Blacklist Email", 
+                                        command=self.blacklist_manual_email, style='Danger.TButton')
+        blacklist_manual_btn.grid(row=0, column=2, sticky=tk.W, pady=5, padx=(10, 0))
+        
+        # Load initial data
+        self.load_email_config()
+        self.refresh_email_statistics()
+        self.refresh_email_usage()
+
+    def save_email_config(self):
+        """Save email configuration"""
+        try:
+            base_email = self.base_email_var.get().strip()
+            domain = self.domain_var.get().strip()
+            starting_number = self.starting_number_var.get()
+            
+            if not base_email or not domain:
+                messagebox.showerror("Error", "Please fill all email configuration fields")
+                return
+            
+            success = self.email_manager.set_email_config(base_email, domain, starting_number)
+            
+            if success:
+                self.update_email_preview()
+                self.refresh_email_statistics()
+                messagebox.showinfo("Success", "Email configuration saved!")
+                self.log_message(f"Email config updated: {base_email}@{domain} starting from {starting_number}")
+            else:
+                messagebox.showerror("Error", "Failed to save email configuration")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save email configuration: {str(e)}")
+
+    def load_email_config(self):
+        """Load existing email configuration"""
+        try:
+            config = self.email_manager.get_email_config()
+            if config:
+                self.base_email_var.set(config['base_email'])
+                self.domain_var.set(config['domain'])
+                self.starting_number_var.set(config['starting_number'])
+                self.update_email_preview()
+        except Exception as e:
+            print(f"Error loading email config: {e}")
+
+    def update_email_preview(self):
+        """Update the email preview display"""
+        try:
+            config = self.email_manager.get_email_config()
+            if config:
+                preview_email = f"{config['base_email']}{config['current_number']}@{config['domain']}"
+                self.email_preview_label.config(text=f"Next: {preview_email}")
+        except Exception as e:
+            print(f"Error updating email preview: {e}")
+
+    def refresh_email_statistics(self):
+        """Refresh email statistics display"""
+        try:
+            stats = self.email_manager.get_email_statistics()
+            config = self.email_manager.get_email_config()
+            
+            self.email_stats_text.config(state='normal')
+            self.email_stats_text.delete(1.0, tk.END)
+            
+            stats_text = "Email System Statistics:\n\n"
+            
+            if config:
+                stats_text += f"Base Email: {config['base_email']}\n"
+                stats_text += f"Domain: {config['domain']}\n"
+                stats_text += f"Starting Number: {config['starting_number']}\n"
+                stats_text += f"Current Number: {config['current_number']}\n\n"
+            
+            stats_text += "Email Usage:\n"
+            stats_text += f"Active: {stats.get('active', 0)}\n"
+            stats_text += f"Completed: {stats.get('completed', 0)}\n"
+            stats_text += f"Blacklisted: {stats.get('blacklisted', 0)}\n"
+            stats_text += f"Total Used: {sum(stats.get(key, 0) for key in ['active', 'completed', 'blacklisted'])}"
+            
+            self.email_stats_text.insert(1.0, stats_text)
+            self.email_stats_text.config(state='disabled')
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to refresh email statistics: {str(e)}")
+
+    def refresh_email_usage(self):
+        """Refresh email usage list"""
+        try:
+            # Clear existing items
+            for item in self.email_usage_tree.get_children():
+                self.email_usage_tree.delete(item)
+            
+            usage_data = self.email_manager.get_all_email_usage()
+            
+            for usage in usage_data:
+                process_text = f"Process {usage['process_number']}" if usage['process_number'] else "Manual"
+                status = usage['status'].title()
+                assigned_time = usage['assigned_at'][:16] if usage['assigned_at'] else "N/A"
+                
+                self.email_usage_tree.insert('', 'end', values=(
+                    usage['email_address'],
+                    process_text,
+                    status,
+                    assigned_time
+                ))
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to refresh email usage: {str(e)}")
+
+    def reset_email_system(self):
+        """Reset the entire email system"""
+        try:
+            if messagebox.askyesno("Confirm Reset", 
+                                "This will delete ALL email usage data and reset the system.\n\nAre you sure?"):
+                self.email_manager.reset_email_system()
+                self.refresh_email_statistics()
+                self.refresh_email_usage()
+                self.update_email_preview()
+                messagebox.showinfo("Success", "Email system reset successfully!")
+                self.log_message("Email system reset - all usage data cleared")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to reset email system: {str(e)}")
+
+    def blacklist_manual_email(self):
+        """Manually blacklist an email address"""
+        try:
+            email = self.manual_email_var.get().strip()
+            if not email:
+                messagebox.showerror("Error", "Please enter an email address")
+                return
+            
+            if '@' not in email:
+                messagebox.showerror("Error", "Please enter a valid email address")
+                return
+            
+            self.email_manager.blacklist_email(email)
+            self.manual_email_var.set("")
+            self.refresh_email_statistics()
+            self.refresh_email_usage()
+            messagebox.showinfo("Success", f"Email {email} has been blacklisted")
+            self.log_message(f"Email blacklisted: {email}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to blacklist email: {str(e)}")
+        
         
     def create_automation_tab(self):
         tab_frame = ttk.Frame(self.notebook)
@@ -121,10 +534,69 @@ class CleanModernGUI:
         main_frame.pack(fill=tk.BOTH, expand=True)
         main_frame.columnconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(2, weight=1)
+        main_frame.rowconfigure(4, weight=1)
         
+        # Product URL Configuration
+        url_frame = ttk.LabelFrame(main_frame, text="Product Configuration", padding="10")
+        url_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        url_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(url_frame, text="Product URL:", font=('Arial', 9, 'bold')).grid(
+            row=0, column=0, sticky=tk.W, pady=5, padx=(0, 10))
+        
+        self.product_url_var = tk.StringVar(value="localhost:8000/apple/iphone-17-pro/6.3-inch-display-256gb-deep-blue-unlocked")
+        url_entry = ttk.Entry(url_frame, textvariable=self.product_url_var, font=('Arial', 9), width=80)
+        url_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=5, padx=(0, 10))
+        
+        validate_url_btn = ttk.Button(url_frame, text="Validate URL", 
+                                     command=self.validate_product_url, style='Primary.TButton')
+        validate_url_btn.grid(row=0, column=2, sticky=tk.W, pady=5)
+        
+        self.continuous_mode_var = tk.BooleanVar(value=True)
+        continuous_check = ttk.Checkbutton(url_frame, text="Continuous Mode (Auto-restart processes)", 
+                                          variable=self.continuous_mode_var)
+        continuous_check.grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=5)
+        
+        # Bright Data Proxy Settings
+        proxy_frame = ttk.LabelFrame(main_frame, text="Bright Data Proxy Settings", padding="10")
+        proxy_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        proxy_frame.columnconfigure(1, weight=1)
+        
+        self.use_proxy_var = tk.BooleanVar(value=False)
+        proxy_check = ttk.Checkbutton(proxy_frame, text="Enable Bright Data Proxy (Different IP per process)", 
+                                     variable=self.use_proxy_var, command=self.toggle_proxy_settings)
+        proxy_check.grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=5)
+        
+        ttk.Label(proxy_frame, text="Zone ID:", font=('Arial', 9)).grid(
+            row=1, column=0, sticky=tk.W, pady=2, padx=(20, 10))
+        self.zone_id_label = ttk.Label(proxy_frame, text=f"{self.proxy.zone_id[:8]}...", 
+                                      font=('Arial', 9), foreground='#6b7280')
+        self.zone_id_label.grid(row=1, column=1, sticky=tk.W, pady=2)
+        
+        ttk.Label(proxy_frame, text="Username:", font=('Arial', 9)).grid(
+            row=2, column=0, sticky=tk.W, pady=2, padx=(20, 10))
+        self.username_label = ttk.Label(proxy_frame, text=self.proxy.username, 
+                                       font=('Arial', 9), foreground='#6b7280')
+        self.username_label.grid(row=2, column=1, sticky=tk.W, pady=2)
+        
+        ttk.Label(proxy_frame, text="Endpoint:", font=('Arial', 9)).grid(
+            row=3, column=0, sticky=tk.W, pady=2, padx=(20, 10))
+        self.endpoint_label = ttk.Label(proxy_frame, text=f"{self.proxy.endpoint}:{self.proxy.port}", 
+                                       font=('Arial', 9), foreground='#6b7280')
+        self.endpoint_label.grid(row=3, column=1, sticky=tk.W, pady=2)
+        
+        self.test_proxy_btn = ttk.Button(proxy_frame, text="Test Proxy Connection", 
+                                        command=self.test_proxy_connection, style='Primary.TButton',
+                                        state='disabled')
+        self.test_proxy_btn.grid(row=1, column=2, rowspan=3, sticky=tk.W, padx=(20, 0))
+        
+        self.proxy_status_label = ttk.Label(proxy_frame, text="Proxy disabled", 
+                                           font=('Arial', 8), foreground='#6b7280')
+        self.proxy_status_label.grid(row=4, column=0, columnspan=3, sticky=tk.W, pady=(5, 0), padx=(20, 0))
+        
+        # Selection and Controls
         top_frame = ttk.Frame(main_frame)
-        top_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        top_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
         top_frame.columnconfigure(0, weight=1)
         top_frame.columnconfigure(1, weight=1)
         
@@ -154,18 +626,9 @@ class CleanModernGUI:
                              command=self.test_selection, style='Primary.TButton')
         test_btn.pack(fill=tk.X, pady=2)
         
-        self.use_different_ip_var = tk.BooleanVar(value=False)
-        ip_check = ttk.Checkbutton(control_frame, text="Use different IP for each process", 
-                                  variable=self.use_different_ip_var)
-        ip_check.pack(fill=tk.X, pady=2)
-        
-        self.stop_btn = ttk.Button(control_frame, text="Stop All Processes", 
-                                  command=self.stop_all_automation, style='Danger.TButton',
-                                  state='disabled')
-        self.stop_btn.pack(fill=tk.X, pady=2)
-
+        # Multi-Process Automation
         multi_frame = ttk.LabelFrame(main_frame, text="Multi-Process Automation", padding="10")
-        multi_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        multi_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
         multi_frame.columnconfigure(0, weight=1)
         multi_frame.columnconfigure(1, weight=1)
         multi_frame.columnconfigure(2, weight=1)
@@ -176,28 +639,9 @@ class CleanModernGUI:
         ttk.Label(count_frame, text="Number of Windows:", font=('Arial', 9, 'bold')).pack(anchor=tk.W)
         
         self.process_count_var = tk.IntVar(value=2)
-        self.process_count_spinbox = ttk.Spinbox(
-            count_frame, 
-            from_=1, 
-            to=self.max_processes, 
-            textvariable=self.process_count_var,
-            width=10,
-            command=self.validate_process_count
-        )
+        self.process_count_spinbox = ttk.Spinbox(count_frame, from_=1, to=self.max_processes, 
+                                               textvariable=self.process_count_var, width=10)
         self.process_count_spinbox.pack(anchor=tk.W, pady=2)
-        
-        info_frame = ttk.Frame(multi_frame)
-        info_frame.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5)
-        
-        ttk.Label(info_frame, text="System Limits:", font=('Arial', 9, 'bold')).pack(anchor=tk.W)
-        
-        cpu_count = multiprocessing.cpu_count()
-        memory_gb = psutil.virtual_memory().total / (1024**3)
-        
-        system_info = f"CPU Cores: {cpu_count}\nRAM: {memory_gb:.1f}GB\nMax Recommended: {self.max_processes}"
-        self.system_info_label = ttk.Label(info_frame, text=system_info, 
-                                          font=('Arial', 8), foreground='#6b7280')
-        self.system_info_label.pack(anchor=tk.W, pady=2)
         
         controls_frame = ttk.Frame(multi_frame)
         controls_frame.grid(row=0, column=2, sticky=(tk.W, tk.E), padx=(5, 0))
@@ -221,8 +665,9 @@ class CleanModernGUI:
                                              font=('Arial', 8), foreground='#6b7280')
         self.process_status_label.pack(anchor=tk.W, pady=2)
         
+        # Console Output
         console_frame = ttk.LabelFrame(main_frame, text="Automation Output", padding="10")
-        console_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S))
+        console_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S))
         console_frame.columnconfigure(0, weight=1)
         console_frame.rowconfigure(0, weight=1)
         
@@ -240,29 +685,68 @@ class CleanModernGUI:
         
         clear_btn = ttk.Button(console_controls, text="Clear Console", command=self.clear_console)
         clear_btn.pack(side=tk.LEFT)
-        
-        warning_frame = ttk.Frame(main_frame)
-        warning_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
-        
-        warning_text = f"WARNING: Running multiple processes will consume significant system resources. Each Chrome window uses ~1GB RAM. Recommended maximum: {self.max_processes} processes."
-        warning_label = ttk.Label(warning_frame, text=warning_text, 
-                                 font=('Arial', 8), foreground='#ef4444', wraplength=800)
-        warning_label.pack(anchor=tk.W)
-        
-    def validate_process_count(self):
-        count = self.process_count_var.get()
-        
-        if count > self.max_processes:
-            self.log_message(f"WARNING: {count} processes exceeds recommended maximum of {self.max_processes}")
-            self.log_message("This may cause system performance issues or crashes")
-        elif count > 4:
-            self.log_message(f"CAUTION: {count} processes will use significant resources")
+
+    def toggle_proxy_settings(self):
+        if self.use_proxy_var.get():
+            self.proxy.enable_proxy()
+            self.test_proxy_btn.config(state='normal')
+            self.proxy_status_label.config(text="Proxy enabled - Ready to use different IP per process", 
+                                          foreground='#10b981')
+            self.log_message("Bright Data proxy enabled")
+        else:
+            self.proxy.disable_proxy()
+            self.test_proxy_btn.config(state='disabled')
+            self.proxy_status_label.config(text="Proxy disabled", foreground='#6b7280')
+            self.log_message("Bright Data proxy disabled")
+
+    def test_proxy_connection(self):
+        if not self.use_proxy_var.get():
+            messagebox.showwarning("Warning", "Please enable proxy first")
+            return
             
-        self.update_process_status()
-    
+        self.log_message("Testing Bright Data proxy connection...")
+        self.test_proxy_btn.config(state='disabled', text="Testing...")
+        
+        def test_thread():
+            try:
+                success, result = self.proxy.test_proxy(1)
+                if success:
+                    self.log_message(f"Proxy test successful! IP: {result}")
+                    self.root.after(0, lambda: self.proxy_status_label.config(
+                        text=f"Proxy working - Test IP: {result}", foreground='#10b981'))
+                    self.root.after(0, lambda: messagebox.showinfo("Proxy Test", f"Connection successful!\nTest IP: {result}"))
+                else:
+                    self.log_message(f"Proxy test failed: {result}")
+                    self.root.after(0, lambda: self.proxy_status_label.config(
+                        text=f"Proxy test failed: {result}", foreground='#ef4444'))
+                    self.root.after(0, lambda: messagebox.showerror("Proxy Test", f"Connection failed!\nError: {result}\n\nPlease check:\n1. Zone ID and Username in config.py\n2. Internet connection\n3. Bright Data account status"))
+            except Exception as e:
+                self.log_message(f"Proxy test error: {str(e)}")
+                self.root.after(0, lambda: messagebox.showerror("Proxy Test", f"Test error: {str(e)}"))
+            finally:
+                self.root.after(0, lambda: self.test_proxy_btn.config(state='normal', text="Test Proxy Connection"))
+        
+        threading.Thread(target=test_thread, daemon=True).start()
+
+    def validate_product_url(self):
+        url = self.product_url_var.get().strip()
+        if not url:
+            messagebox.showerror("Error", "Please enter a product URL")
+            return False
+        self.log_message(f"Product URL set to: {url}")
+        messagebox.showinfo("Success", "Product URL validated and set!")
+        return True
+        
     def start_multi_automation(self):
         try:
+            
             count = self.process_count_var.get()
+            product_url = self.product_url_var.get().strip()
+            use_proxy = self.use_proxy_var.get()
+            
+            if not product_url:
+                messagebox.showerror("Error", "Please enter a product URL")
+                return
             
             card = self.db.get_all_cards()
             person = self.db.get_primary_pickup_person()
@@ -271,23 +755,21 @@ class CleanModernGUI:
             if not card or not person or not settings:
                 messagebox.showerror("Error", "Missing required data. Please check your selection.")
                 return
-            
-            if count > self.max_processes:
-                if not messagebox.askyesno("Performance Warning", 
-                    f"You're about to start {count} processes, which exceeds the recommended maximum of {self.max_processes}.\n\n"
-                    f"This may cause:\n"
-                    f"• High memory usage (~{count * 1.5:.1f}GB RAM)\n"
-                    f"• System slowdown\n"
-                    f"• Browser crashes\n\n"
-                    f"Continue anyway?"):
-                    return
+            self.email_manager.cleanup_failed_processes()
+            self.continuous_mode = self.continuous_mode_var.get()
+            self._stopped = False
             
             self.start_multi_btn.config(state='disabled')
             self.stop_all_btn.config(state='normal')
             self.log_message(f"Starting {count} automation processes...")
             
-            if self.use_different_ip_var.get():
-                self.log_message("Using different IP configuration for each process...")
+            if self.continuous_mode:
+                self.log_message("CONTINUOUS MODE ENABLED - Processes will auto-restart when completed")
+            
+            if use_proxy:
+                self.log_message("BRIGHT DATA PROXY ENABLED - Each process will use different IP")
+            else:
+                self.log_message("Running without proxy - All processes use same IP")
             
             for i in range(count):
                 if i > 0:
@@ -295,13 +777,16 @@ class CleanModernGUI:
                     import time
                     time.sleep(2)
                 
-                automation = AppleAutomation(
+                automation = self.AppleAutomation(
                     card_data=card[0],
                     person_data=person,
-                    settings_data=settings
+                    settings_data=settings,
+                    product_url=product_url,
+                    use_proxy=use_proxy,
+                    process_num=i+1
                 )
                 
-                thread = threading.Thread(target=self.run_multi_automation, args=(automation, i+1))
+                thread = threading.Thread(target=self.run_multi_automation_continuous, args=(automation, i+1))
                 thread.daemon = True
                 thread.start()
                 
@@ -313,15 +798,59 @@ class CleanModernGUI:
             messagebox.showerror("Error", f"Failed to start multi-automation: {str(e)}")
             self.reset_automation_ui()
     
+    def run_multi_automation_continuous(self, automation, process_num):
+        cycle_count = 0
+        
+        while not self._stopped and self.continuous_mode:
+            try:
+                cycle_count += 1
+                proxy_info = " (WITH PROXY)" if self.use_proxy_var.get() else " (NO PROXY)"
+                self.log_message(f"Process {process_num}: Starting cycle {cycle_count}{proxy_info}...")
+                
+                product_url = self.product_url_var.get().strip()
+                automation.config.PRODUCT_URL = product_url
+                automation.use_proxy = self.use_proxy_var.get()
+                
+                result = automation.run()
+                
+                if result:
+                    self.log_message(f"Process {process_num}: Cycle {cycle_count} completed successfully!")
+                else:
+                    self.log_message(f"Process {process_num}: Cycle {cycle_count} failed")
+                
+                if self.continuous_mode and not self._stopped:
+                    self.log_message(f"Process {process_num}: Waiting 10 seconds before next cycle...")
+                    import time
+                    time.sleep(10)
+                else:
+                    break
+                    
+            except Exception as e:
+                self.log_message(f"Process {process_num}: Cycle {cycle_count} error - {str(e)}")
+                if self.continuous_mode and not self._stopped:
+                    self.log_message(f"Process {process_num}: Restarting in 15 seconds...")
+                    import time
+                    time.sleep(15)
+                else:
+                    break
+        
+        try:
+            if f"Process {process_num}" in self.active_processes:
+                self.active_processes.remove(f"Process {process_num}")
+        except:
+            pass
+        
+        self.root.after(0, self.update_process_status)
+        self.log_message(f"Process {process_num}: Stopped after {cycle_count} cycles")
+    
     def stop_all_processes(self):
         try:
             self.log_message("Stopping all automation processes...")
-            
+            self._stopped = True
+            self.continuous_mode = False
             self.active_processes.clear()
-            
             self.reset_automation_ui()
             self.log_message("All processes stopped")
-            
         except Exception as e:
             messagebox.showerror("Error", f"Failed to stop automation: {str(e)}")
     
@@ -331,40 +860,17 @@ class CleanModernGUI:
         self.automation = None
         self.automation_thread = None
         self.active_processes.clear()
+        self._stopped = False
         self.update_process_status()
-    
-    def run_multi_automation(self, automation, process_num):
-        try:
-            self.log_message(f"Process {process_num}: Starting automation...")
-            automation.run()
-            self.log_message(f"Process {process_num}: Completed successfully!")
-        except Exception as e:
-            self.log_message(f"Process {process_num}: Error - {str(e)}")
-        finally:
-            try:
-                self.active_processes.remove(f"Process {process_num}")
-            except:
-                pass
-            self.root.after(0, self.update_process_status)
-
-    def stop_all_automation(self):
-        try:
-            self.log_message("Stopping all automation processes...")
-            
-            if self.automation:
-                self.automation.stop()
-            
-            self.active_processes.clear()
-            
-            self.reset_automation_ui()
-            self.log_message("All processes stopped")
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to stop automation: {str(e)}")
     
     def update_process_status(self):
         if self.active_processes:
-            status_text = f"Active: {len(self.active_processes)} processes\n"
+            status_text = f"Active: {len(self.active_processes)} processes"
+            if self.continuous_mode:
+                status_text += " (Continuous Mode)"
+            if self.use_proxy_var.get():
+                status_text += " (With Proxy)"
+            status_text += "\n"
             status_text += ", ".join(self.active_processes[:3])
             if len(self.active_processes) > 3:
                 status_text += f" and {len(self.active_processes) - 3} more..."
@@ -399,11 +905,7 @@ class CleanModernGUI:
         scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
         
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         
@@ -412,15 +914,8 @@ class CleanModernGUI:
         
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        
-        def _bind_to_mousewheel(event):
-            canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        
-        def _unbind_from_mousewheel(event):
-            canvas.unbind_all("<MouseWheel>")
-        
-        canvas.bind('<Enter>', _bind_to_mousewheel)
-        canvas.bind('<Leave>', _unbind_from_mousewheel)
+        canvas.bind('<Enter>', lambda e: canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        canvas.bind('<Leave>', lambda e: canvas.unbind_all("<MouseWheel>"))
         
         self.card_vars = {}
         default_values = self.config.DEFAULT_VALUES
@@ -457,12 +952,10 @@ class CleanModernGUI:
         button_frame = ttk.Frame(scrollable_frame)
         button_frame.grid(row=len(fields), column=0, columnspan=2, pady=15)
         
-        copy_btn = ttk.Button(button_frame, text="Copy User to Bill", 
-                             command=self.auto_fill_billing)
+        copy_btn = ttk.Button(button_frame, text="Copy User to Bill", command=self.auto_fill_billing)
         copy_btn.pack(pady=3)
         
-        add_btn = ttk.Button(button_frame, text="Add Card", 
-                            command=self.add_card, style='Success.TButton')
+        add_btn = ttk.Button(button_frame, text="Add Card", command=self.add_card, style='Success.TButton')
         add_btn.pack(pady=3)
         
         canvas.configure(height=400)
@@ -514,11 +1007,7 @@ class CleanModernGUI:
         scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
         
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         
@@ -527,15 +1016,8 @@ class CleanModernGUI:
         
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        
-        def _bind_to_mousewheel(event):
-            canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        
-        def _unbind_from_mousewheel(event):
-            canvas.unbind_all("<MouseWheel>")
-        
-        canvas.bind('<Enter>', _bind_to_mousewheel)
-        canvas.bind('<Leave>', _unbind_from_mousewheel)
+        canvas.bind('<Enter>', lambda e: canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        canvas.bind('<Leave>', lambda e: canvas.unbind_all("<MouseWheel>"))
         
         explanation = ttk.Label(scrollable_frame, text="First person added becomes PRIMARY pickup person",
                                font=('Arial', 9), foreground='#2563eb', wraplength=250)
@@ -630,11 +1112,7 @@ class CleanModernGUI:
         scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
         
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         
@@ -643,15 +1121,8 @@ class CleanModernGUI:
         
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        
-        def _bind_to_mousewheel(event):
-            canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        
-        def _unbind_from_mousewheel(event):
-            canvas.unbind_all("<MouseWheel>")
-        
-        canvas.bind('<Enter>', _bind_to_mousewheel)
-        canvas.bind('<Leave>', _unbind_from_mousewheel)
+        canvas.bind('<Enter>', lambda e: canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        canvas.bind('<Leave>', lambda e: canvas.unbind_all("<MouseWheel>"))
         
         self.settings_vars = {}
         default_values = self.config.DEFAULT_VALUES
@@ -718,7 +1189,7 @@ class CleanModernGUI:
         delete_btn = ttk.Button(parent, text="Delete Selected", 
                                command=self.delete_selected_settings, style='Danger.TButton')
         delete_btn.grid(row=2, column=0, sticky=tk.W, pady=(10, 0))
-        
+
     def auto_fill_billing(self):
         try:
             self.card_vars['billing_first_var'].set(self.card_vars['user_first_var'].get())
@@ -886,7 +1357,6 @@ class CleanModernGUI:
             self.load_settings()
             self.update_stats()
             self.refresh_selection()
-            self.update_process_limits()
             
             messagebox.showinfo("Success", f"Added {len(zip_codes)} location settings!")
             
@@ -898,7 +1368,6 @@ class CleanModernGUI:
         self.load_persons()
         self.load_settings()
         self.refresh_selection()
-        self.update_process_limits()
 
     def delete_selected_card(self):
         try:
@@ -955,7 +1424,6 @@ class CleanModernGUI:
                     self.load_settings()
                     self.update_stats()
                     self.refresh_selection()
-                    self.update_process_limits()
                     messagebox.showinfo("Success", "Settings deleted!")
                     
         except Exception as e:
@@ -1062,11 +1530,14 @@ class CleanModernGUI:
                 messagebox.showerror("Error", "No location settings available")
                 return
             
+            proxy_status = "WITH PROXY" if self.use_proxy_var.get() else "WITHOUT PROXY"
+            
             test_message = f"""Selection Test Results:
             
 ✓ Payment Card: {card[0]['name']}
 ✓ Pickup Person: {person['name']} ({person['first_name']} {person['last_name']})
 ✓ Location: {settings['zip_code']} - {settings['street_address']}
+✓ Proxy Status: {proxy_status}
 
 All required data is available for automation!"""
             
