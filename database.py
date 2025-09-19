@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import base64
 import random
 from datetime import datetime
-
+from email_manager import EmailManager
 
 class DatabaseManager:
     def __init__(self, db_path="automation_data.db", master_password="default_key_2024"):
@@ -20,6 +20,16 @@ class DatabaseManager:
         self.master_password = master_password
         self.cipher_suite = self._create_cipher_suite()
         self.init_database()
+    
+    def migrate_email_tables(self):
+        try:
+            email_manager = EmailManager(self.db_path)
+            email_manager.create_email_tables()
+            print("Email management tables created/updated successfully")
+        except Exception as e:
+            print(f"Error creating email tables: {e}")
+    
+    
     
     def _create_cipher_suite(self):
         """Create encryption cipher suite from master password"""
