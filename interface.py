@@ -158,7 +158,7 @@ class CleanModernGUI:
         header_frame.pack(fill=tk.X, pady=(0, 10))
         
         title_label = ttk.Label(header_frame, text="iPhone Automation Pro", 
-                               font=('Arial', 18, 'bold'), foreground='#2563eb')
+                            font=('Arial', 18, 'bold'), foreground='#2563eb')
         title_label.pack(side=tk.LEFT)
         
         self.stats_frame = ttk.Frame(header_frame)
@@ -167,25 +167,14 @@ class CleanModernGUI:
         self.notebook = ttk.Notebook(main_container)
         self.notebook.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
         
+        # Create tabs in proper order - only call each once
         self.create_automation_tab()
         self.create_cards_tab()
         self.create_persons_tab()
         self.create_settings_tab()
-        self.create_automation_tab()
         self.create_email_manager_tab()
-
         
         self.update_stats()
-    
-    def load_data(self):
-        self.refresh_card_list()
-        self.refresh_person_list()
-        self.refresh_settings()
-        self.refresh_email_statistics()
-        self.refresh_email_usage()
-        self.update_email_preview()
-        self.update_selection_labels()
-        
         
     def refresh_email_statistics(self):
         try:
@@ -534,7 +523,7 @@ class CleanModernGUI:
         main_frame.pack(fill=tk.BOTH, expand=True)
         main_frame.columnconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(4, weight=1)
+        main_frame.rowconfigure(5, weight=1)
         
         # Product URL Configuration
         url_frame = ttk.LabelFrame(main_frame, text="Product Configuration", padding="10")
@@ -544,17 +533,17 @@ class CleanModernGUI:
         ttk.Label(url_frame, text="Product URL:", font=('Arial', 9, 'bold')).grid(
             row=0, column=0, sticky=tk.W, pady=5, padx=(0, 10))
         
-        self.product_url_var = tk.StringVar(value="localhost:8000/apple/iphone-17-pro/6.3-inch-display-256gb-deep-blue-unlocked")
+        self.product_url_var = tk.StringVar(value="https://www.apple.com/shop/buy-iphone/iphone-17-pro/6.3-inch-display-256gb-deep-blue-unlocked")
         url_entry = ttk.Entry(url_frame, textvariable=self.product_url_var, font=('Arial', 9), width=80)
         url_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=5, padx=(0, 10))
         
         validate_url_btn = ttk.Button(url_frame, text="Validate URL", 
-                                     command=self.validate_product_url, style='Primary.TButton')
+                                    command=self.validate_product_url, style='Primary.TButton')
         validate_url_btn.grid(row=0, column=2, sticky=tk.W, pady=5)
         
         self.continuous_mode_var = tk.BooleanVar(value=True)
         continuous_check = ttk.Checkbutton(url_frame, text="Continuous Mode (Auto-restart processes)", 
-                                          variable=self.continuous_mode_var)
+                                        variable=self.continuous_mode_var)
         continuous_check.grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=5)
         
         # Bright Data Proxy Settings
@@ -564,25 +553,25 @@ class CleanModernGUI:
         
         self.use_proxy_var = tk.BooleanVar(value=False)
         proxy_check = ttk.Checkbutton(proxy_frame, text="Enable Bright Data Proxy (Different IP per process)", 
-                                     variable=self.use_proxy_var, command=self.toggle_proxy_settings)
+                                    variable=self.use_proxy_var, command=self.toggle_proxy_settings)
         proxy_check.grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=5)
         
         ttk.Label(proxy_frame, text="Zone ID:", font=('Arial', 9)).grid(
             row=1, column=0, sticky=tk.W, pady=2, padx=(20, 10))
         self.zone_id_label = ttk.Label(proxy_frame, text=f"{self.proxy.zone_id[:8]}...", 
-                                      font=('Arial', 9), foreground='#6b7280')
+                                    font=('Arial', 9), foreground='#6b7280')
         self.zone_id_label.grid(row=1, column=1, sticky=tk.W, pady=2)
         
         ttk.Label(proxy_frame, text="Username:", font=('Arial', 9)).grid(
             row=2, column=0, sticky=tk.W, pady=2, padx=(20, 10))
         self.username_label = ttk.Label(proxy_frame, text=self.proxy.username, 
-                                       font=('Arial', 9), foreground='#6b7280')
+                                    font=('Arial', 9), foreground='#6b7280')
         self.username_label.grid(row=2, column=1, sticky=tk.W, pady=2)
         
         ttk.Label(proxy_frame, text="Endpoint:", font=('Arial', 9)).grid(
             row=3, column=0, sticky=tk.W, pady=2, padx=(20, 10))
         self.endpoint_label = ttk.Label(proxy_frame, text=f"{self.proxy.endpoint}:{self.proxy.port}", 
-                                       font=('Arial', 9), foreground='#6b7280')
+                                    font=('Arial', 9), foreground='#6b7280')
         self.endpoint_label.grid(row=3, column=1, sticky=tk.W, pady=2)
         
         self.test_proxy_btn = ttk.Button(proxy_frame, text="Test Proxy Connection", 
@@ -591,7 +580,7 @@ class CleanModernGUI:
         self.test_proxy_btn.grid(row=1, column=2, rowspan=3, sticky=tk.W, padx=(20, 0))
         
         self.proxy_status_label = ttk.Label(proxy_frame, text="Proxy disabled", 
-                                           font=('Arial', 8), foreground='#6b7280')
+                                        font=('Arial', 8), foreground='#6b7280')
         self.proxy_status_label.grid(row=4, column=0, columnspan=3, sticky=tk.W, pady=(5, 0), padx=(20, 0))
         
         # Selection and Controls
@@ -604,31 +593,52 @@ class CleanModernGUI:
         selection_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N), padx=(0, 7))
         
         self.card_selection_label = ttk.Label(selection_frame, text="No cards available", 
-                                             font=('Arial', 9), foreground='#ef4444', wraplength=300)
+                                            font=('Arial', 9), foreground='#ef4444', wraplength=300)
         self.card_selection_label.pack(anchor=tk.W, pady=2)
         
         self.person_selection_label = ttk.Label(selection_frame, text="No pickup persons available",
-                                               font=('Arial', 9), foreground='#ef4444', wraplength=300)
+                                            font=('Arial', 9), foreground='#ef4444', wraplength=300)
         self.person_selection_label.pack(anchor=tk.W, pady=2)
         
         self.location_selection_label = ttk.Label(selection_frame, text="No location settings available",
-                                                 font=('Arial', 9), foreground='#ef4444', wraplength=300)
+                                                font=('Arial', 9), foreground='#ef4444', wraplength=300)
         self.location_selection_label.pack(anchor=tk.W, pady=2)
         
         refresh_btn = ttk.Button(selection_frame, text="Refresh Selection", 
-                               command=self.refresh_selection, style='Primary.TButton')
+                            command=self.refresh_selection, style='Primary.TButton')
         refresh_btn.pack(pady=(10, 0))
         
         control_frame = ttk.LabelFrame(top_frame, text="Controls", padding="10")
         control_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N), padx=(7, 0))
         
         test_btn = ttk.Button(control_frame, text="Test Selection", 
-                             command=self.test_selection, style='Primary.TButton')
+                            command=self.test_selection, style='Primary.TButton')
         test_btn.pack(fill=tk.X, pady=2)
+        
+        # Single Process Automation
+        single_frame = ttk.LabelFrame(main_frame, text="Single Process Automation", padding="10")
+        single_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        single_frame.columnconfigure(0, weight=1)
+        single_frame.columnconfigure(1, weight=1)
+        single_frame.columnconfigure(2, weight=1)
+        
+        single_controls = ttk.Frame(single_frame)
+        single_controls.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 5))
+        
+        ttk.Label(single_controls, text="Single Window:", font=('Arial', 9, 'bold')).pack(anchor=tk.W)
+        
+        self.start_single_btn = ttk.Button(single_controls, text="Start Single Process", 
+                                        command=self.start_single_automation, style='Success.TButton')
+        self.start_single_btn.pack(fill=tk.X, pady=2)
+        
+        self.stop_single_btn = ttk.Button(single_controls, text="Stop Single Process", 
+                                        command=self.stop_single_process, style='Danger.TButton',
+                                        state='disabled')
+        self.stop_single_btn.pack(fill=tk.X, pady=2)
         
         # Multi-Process Automation
         multi_frame = ttk.LabelFrame(main_frame, text="Multi-Process Automation", padding="10")
-        multi_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        multi_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
         multi_frame.columnconfigure(0, weight=1)
         multi_frame.columnconfigure(1, weight=1)
         multi_frame.columnconfigure(2, weight=1)
@@ -640,7 +650,7 @@ class CleanModernGUI:
         
         self.process_count_var = tk.IntVar(value=2)
         self.process_count_spinbox = ttk.Spinbox(count_frame, from_=1, to=self.max_processes, 
-                                               textvariable=self.process_count_var, width=10)
+                                            textvariable=self.process_count_var, width=10)
         self.process_count_spinbox.pack(anchor=tk.W, pady=2)
         
         controls_frame = ttk.Frame(multi_frame)
@@ -649,12 +659,12 @@ class CleanModernGUI:
         ttk.Label(controls_frame, text="Multi-Process:", font=('Arial', 9, 'bold')).pack(anchor=tk.W)
         
         self.start_multi_btn = ttk.Button(controls_frame, text="Start Multiple", 
-                                         command=self.start_multi_automation, style='Warning.TButton')
+                                        command=self.start_multi_automation, style='Warning.TButton')
         self.start_multi_btn.pack(fill=tk.X, pady=2)
         
         self.stop_all_btn = ttk.Button(controls_frame, text="Stop All Processes", 
-                                      command=self.stop_all_processes, style='Danger.TButton',
-                                      state='disabled')
+                                    command=self.stop_all_processes, style='Danger.TButton',
+                                    state='disabled')
         self.stop_all_btn.pack(fill=tk.X, pady=2)
         
         status_frame = ttk.Frame(multi_frame)
@@ -662,17 +672,17 @@ class CleanModernGUI:
         
         ttk.Label(status_frame, text="Active Processes:", font=('Arial', 9, 'bold')).pack(anchor=tk.W)
         self.process_status_label = ttk.Label(status_frame, text="No active processes", 
-                                             font=('Arial', 8), foreground='#6b7280')
+                                            font=('Arial', 8), foreground='#6b7280')
         self.process_status_label.pack(anchor=tk.W, pady=2)
         
         # Console Output
         console_frame = ttk.LabelFrame(main_frame, text="Automation Output", padding="10")
-        console_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S))
+        console_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S))
         console_frame.columnconfigure(0, weight=1)
         console_frame.rowconfigure(0, weight=1)
         
         self.console_text = tk.Text(console_frame, height=15, wrap=tk.WORD,
-                                   font=('Consolas', 9), bg='#1e1e1e', fg='#e5e7eb')
+                                font=('Consolas', 9), bg='#1e1e1e', fg='#e5e7eb')
         
         console_scrollbar = ttk.Scrollbar(console_frame, orient=tk.VERTICAL, command=self.console_text.yview)
         self.console_text.configure(yscrollcommand=console_scrollbar.set)
@@ -685,6 +695,138 @@ class CleanModernGUI:
         
         clear_btn = ttk.Button(console_controls, text="Clear Console", command=self.clear_console)
         clear_btn.pack(side=tk.LEFT)
+    
+    def start_single_automation(self):
+
+        try:
+            product_url = self.product_url_var.get().strip()
+            use_proxy = self.use_proxy_var.get()
+            
+            if not product_url:
+                messagebox.showerror("Error", "Please enter a product URL")
+                return
+            
+            card = self.db.get_all_cards()
+            person = self.db.get_primary_pickup_person()
+            settings = self.db.get_default_settings()
+            
+            if not card or not person or not settings:
+                messagebox.showerror("Error", "Missing required data. Please check your selection.")
+                return
+            
+            self.email_manager.cleanup_failed_processes()
+            self.continuous_mode = self.continuous_mode_var.get()
+            self._stopped = False
+            
+            self.start_single_btn.config(state='disabled')
+            self.stop_single_btn.config(state='normal')
+            self.start_multi_btn.config(state='disabled')
+            
+            self.log_message("Starting single automation process...")
+            
+            if self.continuous_mode:
+                self.log_message("CONTINUOUS MODE ENABLED - Process will auto-restart when completed")
+            
+            if use_proxy:
+                self.log_message("BRIGHT DATA PROXY ENABLED - Using proxy connection")
+            else:
+                self.log_message("Running without proxy")
+            
+            automation = self.AppleAutomation(
+                card_data=card[0],
+                person_data=person,
+                settings_data=settings,
+                product_url=product_url,
+                use_proxy=use_proxy,
+                process_num=1
+            )
+            
+            self.automation_thread = threading.Thread(target=self.run_single_automation_continuous, args=(automation, 1))
+            self.automation_thread.daemon = True
+            self.automation_thread.start()
+            
+            self.active_processes.append("Single Process")
+            self.update_process_status()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to start single automation: {str(e)}")
+            self.reset_single_automation_ui()
+
+    def run_single_automation_continuous(self, automation, process_num):
+        """Run single automation with continuous mode support"""
+        cycle_count = 0
+        
+        while not self._stopped:
+            try:
+                cycle_count += 1
+                proxy_info = " (WITH PROXY)" if self.use_proxy_var.get() else " (NO PROXY)"
+                self.log_message(f"Single Process: Starting cycle {cycle_count}{proxy_info}...")
+                
+                product_url = self.product_url_var.get().strip()
+                automation.config.PRODUCT_URL = product_url
+                automation.use_proxy = self.use_proxy_var.get()
+                
+                result = automation.run()
+                
+                if result:
+                    self.log_message(f"Single Process: Cycle {cycle_count} completed successfully!")
+                else:
+                    self.log_message(f"Single Process: Cycle {cycle_count} failed")
+                
+                if self.continuous_mode and not self._stopped:
+                    self.log_message(f"Single Process: Waiting 10 seconds before next cycle...")
+                    import time
+                    time.sleep(10)
+                else:
+                    break
+                    
+            except Exception as e:
+                self.log_message(f"Single Process: Cycle {cycle_count} error - {str(e)}")
+                if self.continuous_mode and not self._stopped:
+                    self.log_message(f"Single Process: Restarting in 15 seconds...")
+                    import time
+                    time.sleep(15)
+                else:
+                    break
+        
+        try:
+            if "Single Process" in self.active_processes:
+                self.active_processes.remove("Single Process")
+        except:
+            pass
+        
+        self.root.after(0, self.reset_single_automation_ui)
+        self.log_message(f"Single Process: Stopped after {cycle_count} cycles")
+
+    def stop_single_process(self):
+        """Stop the single automation process"""
+        try:
+            self.log_message("Stopping single automation process...")
+            self._stopped = True
+            self.continuous_mode = False
+            
+            if "Single Process" in self.active_processes:
+                self.active_processes.remove("Single Process")
+            
+            self.reset_single_automation_ui()
+            self.log_message("Single process stopped")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to stop single automation: {str(e)}")
+
+    def reset_single_automation_ui(self):
+        """Reset single automation UI elements"""
+        self.start_single_btn.config(state='normal')
+        self.stop_single_btn.config(state='disabled')
+        self.start_multi_btn.config(state='normal')
+        self.automation = None
+        self.automation_thread = None
+        self.update_process_status()
+
+    def update_selection_labels(self):
+        """Update the selection labels - add this method if it doesn't exist"""
+        self.refresh_selection()
+
+
 
     def toggle_proxy_settings(self):
         if self.use_proxy_var.get():

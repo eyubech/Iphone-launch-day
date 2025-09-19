@@ -21,10 +21,11 @@ class Config:
     SCROLL_PERCENTAGE = 0.22
     
     # Bright Data Proxy Settings
-    BRIGHT_DATA_ZONE_ID = "c1d192d556b8961124809501eed5e00a8c15e1d92cacc015fec073ac301f4eb3"
-    BRIGHT_DATA_USERNAME = "ayoub@garraje.com"
-    BRIGHT_DATA_ENDPOINT = "zproxy.lum-superproxy.io"
-    BRIGHT_DATA_PORT = 22225
+    # In config.py, update these lines:
+    BRIGHT_DATA_USERNAME = "brd-customer-hl_34c5d083-zone-residential_proxy1"
+    BRIGHT_DATA_ZONE_ID = "9peyq4z8rhj0"  # This is actually the password
+    BRIGHT_DATA_ENDPOINT = "brd.superproxy.io"
+    BRIGHT_DATA_PORT = 33335
     
     # Default values (can be overridden by user input)
     DEFAULT_VALUES = {
@@ -196,5 +197,6 @@ class Config:
         ]
     }
     
+    # Default Product URL - can be overridden in runtime
     
     PRODUCT_URL =  "https://www.apple.com/shop/buy-iphone/iphone-17-pro/6.3-inch-display-256gb-deep-blue-unlocked"
