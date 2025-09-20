@@ -1,2 +1,21 @@
-selenium>=4.15.0
-cryptography>=41.0.0
+
+selenium>=4.20,<5
+webdriver-manager
+
+selenium-wire==5.1.0
+mitmproxy==10.3.0
+blinker==1.7.0
+msgpack>=1.0.7
+
+cryptography>=41
+
+brotli
+
+psutil
+
+cffi>=1.0.9 ; sys_platform == "win32"
+
+requests
+
+urllib3
+certifi
