@@ -24,7 +24,7 @@ class Config:
     # A safe default product page (change as needed)
     PRODUCT_URL = os.getenv(
         "PRODUCT_URL",
-        "https://www.apple.com/shop/buy-iphone/iphone-17-pro/6.3-inch-display-256gb-deep-blue-unlocked",
+        "https://www.apple.com/shop/buy-iphone/iphone-17-pro/6.9-inch-display-256gb-deep-blue-unlocked",
     )
 
     # Data used by the form fillers when nothing else is provided

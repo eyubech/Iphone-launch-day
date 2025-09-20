@@ -533,7 +533,7 @@ class CleanModernGUI:
         ttk.Label(url_frame, text="Product URL:", font=('Arial', 9, 'bold')).grid(
             row=0, column=0, sticky=tk.W, pady=5, padx=(0, 10))
         
-        self.product_url_var = tk.StringVar(value="https://www.apple.com/shop/buy-iphone/iphone-17-pro/6.3-inch-display-256gb-deep-blue-unlocked")
+        self.product_url_var = tk.StringVar(value="https://www.apple.com/shop/buy-iphone/iphone-17-pro/6.9-inch-display-256gb-deep-blue-unlocked")
         url_entry = ttk.Entry(url_frame, textvariable=self.product_url_var, font=('Arial', 9), width=80)
         url_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=5, padx=(0, 10))
         
