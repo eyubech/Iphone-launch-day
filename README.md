@@ -35,6 +35,7 @@ pip install selenium
 pip install cryptography
 pip install psutil
 pip install webdriver-manager
+pip install selenium-wire
 ```
 
 ### Step 4: Run the Application
