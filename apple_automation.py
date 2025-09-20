@@ -590,38 +590,73 @@ class AppleAutomation:
     def handle_pickup_section(self):
         if self._stopped:
             return False
-        logging.info("Selecting pickup tab")
-        time.sleep(2.0)
-        try:
-            for sel in [
-                "[data-autom='fulfillment-pickup-tab']",
-                "button[role='radio'][data-autom*='pickup']",
-                ".rc-segmented-control-button",
-            ]:
-                btns = self.driver.find_elements(By.CSS_SELECTOR, sel)
-                if btns:
-                    idx = 1 if len(btns) >= 2 else 0
-                    attempts = [
-                        ("regular", lambda: btns[idx].click()),
-                        ("JS", lambda: self.driver.execute_script("arguments[0].click();", btns[idx])),
-                        ("Actions", lambda: ActionChains(self.driver).move_to_element(btns[idx]).click().perform()),
+        logging.info("Looking for pickup button (segmented control)")
+        time.sleep(5)
+        
+        pickup_selectors = [
+            '.rc-segmented-control-button',
+            'button.rc-segmented-control-button',
+            'button[role="tab"]',
+            'button[class*="segmented-control"]',
+            '.rc-segmented-control-item button'
+        ]
+        
+        for selector in pickup_selectors:
+            try:
+                logging.info(f"Looking for pickup buttons with selector: {selector}")
+                buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                logging.info(f"Found {len(buttons)} segmented control buttons")
+                
+                if len(buttons) >= 2:
+                    pickup_button = buttons[1]
+                    logging.info("Attempting to click second segmented button (pickup)")
+                    
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", pickup_button)
+                    time.sleep(1)
+                    
+                    click_methods = [
+                        ("Regular click", lambda: pickup_button.click()),
+                        ("JavaScript click", lambda: self.driver.execute_script("arguments[0].click();", pickup_button)),
+                        ("Action chains", lambda: ActionChains(self.driver).move_to_element(pickup_button).click().perform()),
+                        ("Force click event", lambda: self.driver.execute_script("""
+                            arguments[0].dispatchEvent(new MouseEvent('click', {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window
+                            }));
+                        """, pickup_button))
                     ]
-                    for name, fn in attempts:
+                    
+                    for method_name, method in click_methods:
                         try:
-                            self._scroll_center(btns[idx])
-                            fn()
-                            time.sleep(1.0)
-                            cls = (btns[idx].get_attribute("class") or "") + " " + (btns[idx].get_attribute("aria-checked") or "")
-                            if "selected" in cls or "true" in cls:
-                                logging.info(f"Pickup tab selected via {name}")
+                            logging.info(f"Trying {method_name}")
+                            method()
+                            time.sleep(2)
+                            
+                            button_class = pickup_button.get_attribute('class')
+                            aria_checked = pickup_button.get_attribute('aria-checked')
+                            
+                            if 'selected' in button_class or aria_checked == 'true':
+                                logging.info(f"Pickup button clicked successfully using {method_name}")
+                                logging.info(f"Button class: {button_class}")
+                                logging.info(f"Aria-checked: {aria_checked}")
+                                time.sleep(3)
                                 return self.handle_zip_code_input()
-                        except Exception:
+                            else:
+                                logging.info(f"{method_name} - no state change detected")
+                        except Exception as e:
+                            logging.info(f"{method_name} failed: {e}")
                             continue
-            logging.info("Pickup toggle not clearly found; continuing to Zip handler anyway.")
-            return self.handle_zip_code_input()
-        except Exception:
-            logging.error("Could not select pickup tab")
-            return False
+                    
+                    logging.info("All click methods failed for pickup button")
+                    return False
+                    
+            except Exception as e:
+                logging.info(f"Selector {selector} failed: {e}")
+                continue
+        
+        logging.error("Could not find pickup segmented control buttons")
+        return False
 
     def handle_zip_code_input(self):
         if self._stopped:
@@ -674,23 +709,18 @@ class AppleAutomation:
         except Exception as e:
             logging.error(f"Error focusing ZIP input: {e}")
 
-        # Clear and enter ZIP code using method that works with Apple's interface
         try:
-            # First clear the field completely
             zip_input.click()
             time.sleep(0.3)
             
-            # Select all and delete
             zip_input.send_keys(Keys.CONTROL + 'a')
             time.sleep(0.2)
             zip_input.send_keys(Keys.DELETE)
             time.sleep(0.3)
             
-            # Clear again to ensure it's empty
             zip_input.clear()
             time.sleep(0.5)
             
-            # Type the ZIP code
             zip_input.send_keys(zip_code)
             logging.info(f"ZIP code entered: {zip_code}")
             time.sleep(1)
@@ -699,7 +729,6 @@ class AppleAutomation:
             logging.error(f"Error entering ZIP code: {e}")
             return False
 
-        # Click apply button
         apply_selectors = [
             'button[id="checkout.fulfillment.pickupTab.pickup.storeLocator.apply"]',
             'button.form-textbox-button',

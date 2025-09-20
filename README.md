@@ -17,6 +17,7 @@
    python --version
    ```
 
+
 ### Step 2: Download and Extract Project
 
 1. Extract the project files to your **Desktop** folder
