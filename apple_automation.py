@@ -669,10 +669,15 @@ class AppleAutomation:
                         logging.info("Waiting 60 seconds before retrying...")
                         time.sleep(60)
                         retry_count += 1
+                        logging.info("Refreshing page before retrying...")
+                        self.driver.refresh()
+                        time.sleep(3)
                         zip_code = str(self.user_data["zip_code"]).strip()
                         logging.info(f"Retrying ZIP code search: {zip_code}")
                         try:
-                            zip_input = self.driver.find_element(By.CSS_SELECTOR, "#checkout\\.fulfillment\\.pickupTab\\.pickup\\.storeLocator\\.searchInput")
+                            zip_input = WebDriverWait(self.driver, 10).until(
+                                EC.element_to_be_clickable((By.CSS_SELECTOR, "#checkout\\.fulfillment\\.pickupTab\\.pickup\\.storeLocator\\.searchInput"))
+                            )
                             zip_input.clear()
                             zip_input.send_keys(zip_code)
                             apply_btn = self.driver.find_element(By.CSS_SELECTOR, 'button[id="checkout.fulfillment.pickupTab.pickup.storeLocator.apply"]')
@@ -693,10 +698,15 @@ class AppleAutomation:
                         logging.info("Waiting 60 seconds before retrying...")
                         time.sleep(60)
                         retry_count += 1
+                        logging.info("Refreshing page before retrying...")
+                        self.driver.refresh()
+                        time.sleep(3)
                         zip_code = str(self.user_data["zip_code"]).strip()
                         logging.info(f"Retrying ZIP code search: {zip_code}")
                         try:
-                            zip_input = self.driver.find_element(By.CSS_SELECTOR, "#checkout\\.fulfillment\\.pickupTab\\.pickup\\.storeLocator\\.searchInput")
+                            zip_input = WebDriverWait(self.driver, 10).until(
+                                EC.element_to_be_clickable((By.CSS_SELECTOR, "#checkout\\.fulfillment\\.pickupTab\\.pickup\\.storeLocator\\.searchInput"))
+                            )
                             zip_input.clear()
                             zip_input.send_keys(zip_code)
                             apply_btn = self.driver.find_element(By.CSS_SELECTOR, 'button[id="checkout.fulfillment.pickupTab.pickup.storeLocator.apply"]')
@@ -717,10 +727,15 @@ class AppleAutomation:
                         logging.info("Waiting 60 seconds before retrying...")
                         time.sleep(60)
                         retry_count += 1
+                        logging.info("Refreshing page before retrying...")
+                        self.driver.refresh()
+                        time.sleep(3)
                         zip_code = str(self.user_data["zip_code"]).strip()
                         logging.info(f"Retrying ZIP code search: {zip_code}")
                         try:
-                            zip_input = self.driver.find_element(By.CSS_SELECTOR, "#checkout\\.fulfillment\\.pickupTab\\.pickup\\.storeLocator\\.searchInput")
+                            zip_input = WebDriverWait(self.driver, 10).until(
+                                EC.element_to_be_clickable((By.CSS_SELECTOR, "#checkout\\.fulfillment\\.pickupTab\\.pickup\\.storeLocator\\.searchInput"))
+                            )
                             zip_input.clear()
                             zip_input.send_keys(zip_code)
                             apply_btn = self.driver.find_element(By.CSS_SELECTOR, 'button[id="checkout.fulfillment.pickupTab.pickup.storeLocator.apply"]')
@@ -735,10 +750,15 @@ class AppleAutomation:
                     logging.info("Waiting 60 seconds before retrying...")
                     time.sleep(60)
                     retry_count += 1
+                    logging.info("Refreshing page before retrying...")
+                    self.driver.refresh()
+                    time.sleep(3)
                     zip_code = str(self.user_data["zip_code"]).strip()
                     logging.info(f"Retrying ZIP code search: {zip_code}")
                     try:
-                        zip_input = self.driver.find_element(By.CSS_SELECTOR, "#checkout\\.fulfillment\\.pickupTab\\.pickup\\.storeLocator\\.searchInput")
+                        zip_input = WebDriverWait(self.driver, 10).until(
+                            EC.element_to_be_clickable((By.CSS_SELECTOR, "#checkout\\.fulfillment\\.pickupTab\\.pickup\\.storeLocator\\.searchInput"))
+                        )
                         zip_input.clear()
                         zip_input.send_keys(zip_code)
                         apply_btn = self.driver.find_element(By.CSS_SELECTOR, 'button[id="checkout.fulfillment.pickupTab.pickup.storeLocator.apply"]')
